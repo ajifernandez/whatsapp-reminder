@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recordatorios WhatsApp</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">💬</span>
+      <div>
+        <h1>Recordatorios WhatsApp</h1>
+        <p class="sub">Envía recordatorios de citas con un clic</p>
+      </div>
+    </div>
+    <div class="estado">
+      <span id="estadoPunto" class="punto desconectado"></span>
+      <span id="estadoTexto">Desconectado</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Panel de conexión -->
+    <section class="tarjeta conexion">
+      <div class="conexion-info">
+        <h2>1 · Conecta tu WhatsApp</h2>
+        <p id="ayudaConexion">
+          Pulsa <b>Conectar</b>. Aparecerá un código QR. Ábrelo con el móvil:
+          <b>WhatsApp → Ajustes → Dispositivos vinculados → Vincular dispositivo</b>.
+          Solo hace falta la primera vez.
+        </p>
+        <div class="botones">
+          <button id="btnConectar" class="btn btn-verde">Conectar WhatsApp</button>
+          <button id="btnCerrar" class="btn btn-gris" disabled>Cerrar sesión</button>
+        </div>
+      </div>
+      <div id="qrCaja" class="qr-caja oculto">
+        <img id="qrImg" alt="Código QR" />
+        <p class="qr-nota">Escanea este código con tu teléfono</p>
+      </div>
+    </section>
+
+    <section class="tarjeta">
+      <div class="seccion-cabecera">
+        <h2>2 · Mensaje a enviar</h2>
+      </div>
+      <textarea id="mensajePlantilla" class="mensaje-plantilla" rows="4"></textarea>
+      <p class="ayuda-mensaje">Variables disponibles: <code>{nombre}</code>, <code>{telefono}</code>, <code>{fecha}</code>, <code>{hora}</code>, <code>{especialidad}</code>.</p>
+      <label class="auto-envio">
+        <input type="checkbox" id="chkAutoEnvio" />
+        Enviar automáticamente 24 h antes de cada cita
+        <span class="auto-envio-nota">(la app debe quedar abierta y WhatsApp conectado)</span>
+      </label>
+    </section>
+
+    <!-- Panel de citas -->
+    <section class="tarjeta">
+      <div class="seccion-cabecera">
+        <h2>3 · Citas de hoy</h2>
+        <div class="botones">
+          <button id="btnPegar" class="btn btn-azul">📋 Pegar desde Excel/CSV</button>
+          <button id="btnAnadir" class="btn btn-gris">+ Añadir fila</button>
+          <button id="btnEnviar" class="btn btn-verde" disabled>📤 Enviar recordatorios</button>
+        </div>
+      </div>
+
+      <div class="tabla-scroll">
+        <table id="tabla">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Teléfono</th>
+              <th>Fecha</th>
+              <th>Hora</th>
+              <th>Especialidad</th>
+              <th class="th-estado">Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <p id="vacio" class="vacio oculto">No hay citas. Pulsa «Añadir cita» para empezar.</p>
+
+      <div id="progresoCaja" class="progreso oculto">
+        <div class="barra"><div id="barraRelleno"></div></div>
+        <span id="progresoTexto"></span>
+      </div>
+    </section>
+
+    <!-- Registro -->
+    <section class="tarjeta">
+      <div class="seccion-cabecera">
+        <h2>Registro de envíos</h2>
+        <button id="btnLimpiarLog" class="btn btn-gris pequeno">Limpiar</button>
+      </div>
+      <ul id="log" class="log"></ul>
+    </section>
+  </main>
+
+  <!-- Modal: pegar desde Excel/CSV -->
+  <div id="modalPegar" class="modal oculto">
+    <div class="modal-caja">
+      <h2>Pegar citas desde Excel, CSV o texto</h2>
+      <p class="modal-ayuda">
+        Copia las filas en Excel/LibreOffice (o escríbelas) y pégalas aquí. Una cita por línea, columnas en este orden:
+      </p>
+      <code class="modal-orden">nombre · fecha · teléfono · hora · especialidad</code>
+      <p class="modal-ayuda pequeno-txt">
+        Separador automático: tabulador (Excel), <code>;</code> o <code>,</code>.
+        Fechas <code>dd/mm/aaaa</code> o <code>aaaa-mm-dd</code>. Si la primera línea es la cabecera, se ignora.
+      </p>
+      <textarea id="areaPegar" rows="10" placeholder="Ana García	03/07/2026	34612345678	10:30	revisión&#10;Carlos López	03/07/2026	34687654321	17:00	nutrición"></textarea>
+      <p id="pegarPreview" class="pegar-preview"></p>
+      <div class="modal-botones">
+        <label class="modo-import">
+          <input type="checkbox" id="chkReemplazar" checked />
+          Reemplazar las citas actuales
+        </label>
+        <div class="botones">
+          <button id="btnCancelarPegar" class="btn btn-gris">Cancelar</button>
+          <button id="btnImportar" class="btn btn-azul">Importar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
