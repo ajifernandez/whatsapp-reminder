@@ -60,8 +60,9 @@
       <div class="seccion-cabecera">
         <h2>3 · Citas de hoy</h2>
         <div class="botones">
-          <button id="btnPegar" class="btn btn-azul">📋 Pegar desde Excel/CSV</button>
+          <button id="btnPegar" class="btn btn-azul">📋 Importar citas (Excel, PDF o imagen)</button>
           <button id="btnAnadir" class="btn btn-gris">+ Añadir fila</button>
+          <button id="btnVaciar" class="btn btn-gris" disabled>🗑 Vaciar lista</button>
           <button id="btnEnviar" class="btn btn-verde" disabled>📤 Enviar recordatorios</button>
         </div>
       </div>
@@ -103,14 +104,23 @@
   <!-- Modal: pegar desde Excel/CSV -->
   <div id="modalPegar" class="modal oculto">
     <div class="modal-caja">
-      <h2>Pegar citas desde Excel, CSV o texto</h2>
+      <h2>Importar citas (Excel, CSV, PDF, imagen o texto)</h2>
+      <div id="dropImagen" class="drop-imagen" tabindex="0">
+        <p><b>Pega una captura</b> con <code>Ctrl+V</code>, <b>arrastra aquí un PDF o imagen</b>, o selecciónalo.</p>
+        <div class="botones">
+          <button id="btnImagen" type="button" class="btn btn-gris pequeno">Seleccionar PDF o imagen</button>
+        </div>
+        <input id="inputImagen" type="file" accept=".pdf,application/pdf,image/*" class="oculto" />
+      </div>
+      <p id="archivoEstado" class="pegar-preview"></p>
       <p class="modal-ayuda">
-        Copia las filas en Excel/LibreOffice (o escríbelas) y pégalas aquí. Una cita por línea, columnas en este orden:
+        O copia las filas en Excel/LibreOffice (o escríbelas) y pégalas abajo. Una cita por línea, columnas en este orden:
       </p>
       <code class="modal-orden">nombre · fecha · teléfono · hora · especialidad</code>
       <p class="modal-ayuda pequeno-txt">
         Separador automático: tabulador (Excel), <code>;</code> o <code>,</code>.
         Fechas <code>dd/mm/aaaa</code> o <code>aaaa-mm-dd</code>. Si la primera línea es la cabecera, se ignora.
+        El texto copiado de un PDF también vale: se detectan teléfono, fecha y hora aunque no haya columnas claras.
       </p>
       <textarea id="areaPegar" rows="10" placeholder="Ana García	03/07/2026	34612345678	10:30	revisión&#10;Carlos López	03/07/2026	34687654321	17:00	nutrición"></textarea>
       <p id="pegarPreview" class="pegar-preview"></p>
@@ -127,6 +137,7 @@
     </div>
   </div>
 
+  <script src="parser.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>
