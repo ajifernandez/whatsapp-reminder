@@ -1,6 +1,8 @@
 # Cambiar el orden de columnas del pegado desde Excel
 
-Guía técnica: qué tocar si cambia el orden de las columnas que el usuario pega desde Excel/CSV en el modal «Pegar desde Excel/CSV».
+Guía técnica: qué tocar si cambia el orden de las columnas que el usuario pega desde Excel/CSV en el modal «Importar citas».
+
+> Nota: desde la versión con importación de PDF/imagen, el parseo vive en `renderer/parser.js` (no en `renderer.js`). La importación desde PDF/imagen no depende del orden de columnas (detecta teléfono/fecha/hora por su formato en `extraerCitaDeLinea`); este documento solo aplica al pegado clásico con columnas (`parsearPegado`).
 
 ## Orden actual
 

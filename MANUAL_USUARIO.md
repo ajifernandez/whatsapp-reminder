@@ -152,10 +152,30 @@ Haz clic en cualquier campo de la tabla y modifica el contenido. Los cambios se 
 
 Pulsa el botón de papelera de la fila que quieres eliminar.
 
-## 7. Importar citas desde Excel, CSV o texto
+## 7. Importar citas desde Excel, CSV, PDF, imagen o texto
+
+### 7.1. Desde un PDF o una imagen (captura de pantalla)
+
+Si tu programa de citas solo permite exportar a PDF o guardar una imagen, puedes importar directamente el archivo:
+
+1. Pulsa `Importar citas (Excel, PDF o imagen)`.
+2. Elige una opción:
+   - Pulsa `Seleccionar PDF o imagen` y busca el archivo.
+   - Arrastra el archivo hasta la zona punteada.
+   - Haz una captura de pantalla del listado y pégala con `Ctrl+V` con la ventana abierta.
+3. Espera a que se lea el archivo. Con imágenes se usa reconocimiento de texto (OCR) y puede tardar unos segundos la primera vez.
+4. Los datos detectados aparecen en el cuadro de texto. Revísalos y corrige lo que haga falta (con imágenes el reconocimiento no siempre es perfecto: comprueba sobre todo los teléfonos).
+5. Elige si quieres reemplazar las citas actuales o añadirlas.
+6. Pulsa `Importar`.
+
+En PDF e imágenes no importa el orden de las columnas: el teléfono, la fecha y la hora se reconocen por su formato, y el resto del texto se usa como nombre y especialidad.
+
+> Consejo para capturas: cuanto más grande y nítido se vea el texto, mejor funciona el OCR. Captura solo la zona del listado.
+
+### 7.2. Desde Excel, CSV o texto pegado
 
 1. Copia las filas desde Excel, LibreOffice Calc, CSV o un documento de texto.
-2. Pulsa `Pegar desde Excel/CSV`.
+2. Pulsa `Importar citas (Excel, PDF o imagen)`.
 3. Pega los datos en el cuadro de texto.
 4. Revisa la vista previa.
 5. Elige si quieres reemplazar las citas actuales o añadirlas a las existentes.

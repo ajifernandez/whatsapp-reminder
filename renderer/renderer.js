@@ -33,66 +33,37 @@ const api = {
   estado: () => fetch('/api/estado').then((r) => r.json()).then((d) => d.estado)
 };
 
-// ---------- Importar desde texto pegado (Excel/CSV/txt) ----------
-const CABECERAS = ['nombre', 'name', 'telefono', 'teléfono', 'tel', 'movil', 'móvil'];
+// El parseo (pegado Excel/CSV y texto libre de PDF/OCR) vive en parser.js,
+// que se carga antes que este archivo y es testeable en Node.
 
-function detectarSeparador(texto) {
-  const linea = texto.split(/\r?\n/).find((l) => l.trim() !== '') || '';
-  if (linea.includes('\t')) return '\t';
-  if (linea.includes(';')) return ';';
-  return ',';
-}
+function normalizarCitaOCR(cita) {
+  if (!cita || typeof cita !== 'object') return cita;
 
-function normalizarFecha(v) {
-  const s = (v || '').trim();
-  if (!s) return '';
-  // aaaa-mm-dd (ya válido)
-  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-  // dd/mm/aaaa o dd-mm-aaaa (o año de 2 dígitos)
-  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
-  if (m) {
-    let anio = m[3];
-    if (anio.length === 2) anio = '20' + anio;
-    return `${anio}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const limpia = { ...cita };
+  const especialidad = String(limpia.especialidad || '').trim();
+
+  if (!limpia.hora && especialidad) {
+    const horaDesdeEspecialidad = normalizarHora(especialidad);
+    if (/^\d{2}:\d{2}$/.test(horaDesdeEspecialidad)) {
+      limpia.hora = horaDesdeEspecialidad;
+      limpia.especialidad = '';
+    }
   }
-  return s; // se deja tal cual; el usuario puede corregir
-}
 
-function normalizarHora(v) {
-  const s = (v || '').trim();
-  if (!s) return '';
-  const m = s.match(/^(\d{1,2})[:.h](\d{2})/);
-  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
-  const soloHora = s.match(/^(\d{1,2})$/);
-  if (soloHora) return `${soloHora[1].padStart(2, '0')}:00`;
-  return s;
-}
-
-function parsearPegado(texto) {
-  const sep = detectarSeparador(texto);
-  const lineas = texto.split(/\r?\n/).filter((l) => l.trim() !== '');
-  if (lineas.length === 0) return [];
-
-  const partir = (linea) => linea.split(sep).map((c) => c.trim().replace(/^"(.*)"$/, '$1'));
-
-  // ¿La primera línea es cabecera?
-  const primera = partir(lineas[0]).map((c) => c.toLowerCase());
-  const esCabecera = primera.some((c) => CABECERAS.includes(c));
-  const inicio = esCabecera ? 1 : 0;
-
-  const resultado = [];
-  for (let i = inicio; i < lineas.length; i++) {
-    const c = partir(lineas[i]);
-    resultado.push({
-      nombre: c[0] || '',
-      fecha: normalizarFecha(c[1]),
-      telefono: (c[2] || '').replace(/\s+/g, ''),
-      hora: normalizarHora(c[3]),
-      especialidad: c[4] || ''
-    });
+  if (limpia.hora) {
+    const horaNormalizada = normalizarHora(limpia.hora);
+    if (/^\d{2}:\d{2}$/.test(horaNormalizada)) limpia.hora = horaNormalizada;
   }
-  return resultado;
+
+  if (especialidad) {
+    const horaResidual = normalizarHora(especialidad);
+    if (/^\d{2}:\d{2}$/.test(horaResidual) || /^[-–—_:.,/\\]+$/.test(especialidad)) {
+      limpia.especialidad = '';
+      if (!limpia.hora) limpia.hora = horaResidual;
+    }
+  }
+
+  return limpia;
 }
 
 // ---------- Render de la tabla ----------
@@ -183,6 +154,7 @@ function guardarMensaje() {
 
 function actualizarBotonEnviar() {
   $('btnEnviar').disabled = !conectado || citas.length === 0;
+  $('btnVaciar').disabled = citas.length === 0;
 }
 
 // ---------- Registro ----------
@@ -214,6 +186,15 @@ $('btnAnadir').addEventListener('click', () => {
   pintarTabla();
   const inputs = $('tbody').querySelectorAll('tr:last-child input');
   if (inputs.length) inputs[0].focus();
+});
+
+$('btnVaciar').addEventListener('click', () => {
+  if (citas.length === 0) return;
+  if (!confirm(`¿Borrar las ${citas.length} cita(s) de la lista?`)) return;
+  citas = [];
+  guardar();
+  pintarTabla();
+  log('Lista de citas vaciada.', 'info');
 });
 
 $('btnConectar').addEventListener('click', () => {
@@ -268,11 +249,140 @@ $('chkAutoEnvio').addEventListener('change', async () => {
   }
 });
 
-// ---------- Modal: pegar desde Excel/CSV ----------
+// ---------- Importar desde archivo (PDF o imagen) ----------
+// Las librerías (pdf.js, tesseract.js) se sirven en local desde el propio
+// servidor y se cargan solo la primera vez que se usa un archivo.
+function cargarScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('No se pudo cargar ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function extraerLineasPdf(archivo) {
+  await cargarScript('/vendor/pdfjs/pdf.min.js');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({ data: await archivo.arrayBuffer() }).promise;
+  const lineas = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const pagina = await pdf.getPage(p);
+    const contenido = await pagina.getTextContent();
+    lineas.push(...agruparItemsPdf(contenido.items));
+  }
+  return lineas;
+}
+
+let ocrWorker = null;
+let ocrProgreso = () => {};
+async function extraerLineasImagen(archivo, onProgreso, psm = '4') {
+  await cargarScript('/vendor/tesseract/tesseract.min.js');
+  ocrProgreso = onProgreso;
+  if (!ocrWorker) {
+    ocrWorker = await Tesseract.createWorker('spa', 1, {
+      workerPath: '/vendor/tesseract/worker.min.js',
+      corePath: '/vendor/tesseract-core',
+      langPath: '/vendor/tessdata',
+      logger: (m) => {
+        if (m.status === 'recognizing text') ocrProgreso(Math.round(m.progress * 100));
+      }
+    });
+  }
+  // PSM 4 (columna única) lee bien los listados en tabla; el 3 (automático)
+  // se pierde con las rejillas de las tablas.
+  await ocrWorker.setParameters({ tessedit_pageseg_mode: psm });
+  const { data } = await ocrWorker.recognize(archivo);
+  return data.text.split(/\r?\n/);
+}
+
+let procesandoArchivo = false;
+async function procesarArchivo(archivo) {
+  if (!archivo || procesandoArchivo) return;
+  procesandoArchivo = true;
+  const estado = $('archivoEstado');
+  estado.className = 'pegar-preview';
+  $('dropImagen').classList.add('cargando');
+  try {
+    let lineas;
+    if (archivo.type === 'application/pdf' || /\.pdf$/i.test(archivo.name)) {
+      estado.textContent = 'Leyendo PDF...';
+      lineas = await extraerLineasPdf(archivo);
+    } else if (/^image\//.test(archivo.type)) {
+      estado.textContent = 'Leyendo imagen (OCR)... puede tardar un poco la primera vez.';
+      const progreso = (pct) => { estado.textContent = `Leyendo imagen (OCR)... ${pct}%`; };
+      lineas = await extraerLineasImagen(archivo, progreso);
+      if (!lineas.some((l) => extraerCitaDeLinea(l))) {
+        // Segundo intento con segmentación automática (imágenes sin tabla)
+        estado.textContent = 'Reintentando lectura...';
+        lineas = await extraerLineasImagen(archivo, progreso, '3');
+      }
+    } else {
+      throw new Error('Solo se admiten PDF o imágenes.');
+    }
+    const detectadas = lineas.map(extraerCitaDeLinea).filter(Boolean).map(normalizarCitaOCR);
+    if (detectadas.length === 0) {
+      estado.textContent = 'No se detectó ninguna cita en el archivo (hacen falta teléfonos, fechas u horas legibles).';
+      estado.className = 'pegar-preview error';
+      return;
+    }
+    $('areaPegar').value = detectadas
+      .map((c) => [c.nombre, c.fecha, c.telefono, c.hora, c.especialidad].join('\t'))
+      .join('\n');
+    $('areaPegar').dispatchEvent(new Event('input'));
+    estado.textContent = `Archivo leído: ${detectadas.length} cita(s). Revisa el texto de abajo, corrige lo necesario y pulsa Importar.`;
+    estado.className = 'pegar-preview ok';
+  } catch (err) {
+    estado.textContent = 'Error al leer el archivo: ' + err.message;
+    estado.className = 'pegar-preview error';
+  } finally {
+    procesandoArchivo = false;
+    $('dropImagen').classList.remove('cargando');
+  }
+}
+
+$('btnImagen').addEventListener('click', () => $('inputImagen').click());
+
+$('inputImagen').addEventListener('change', () => {
+  const archivo = $('inputImagen').files[0];
+  $('inputImagen').value = '';
+  procesarArchivo(archivo);
+});
+
+// Arrastrar y soltar sobre la zona punteada
+['dragover', 'dragenter'].forEach((ev) =>
+  $('dropImagen').addEventListener(ev, (e) => {
+    e.preventDefault();
+    $('dropImagen').classList.add('activo');
+  })
+);
+['dragleave', 'drop'].forEach((ev) =>
+  $('dropImagen').addEventListener(ev, () => $('dropImagen').classList.remove('activo'))
+);
+$('dropImagen').addEventListener('drop', (e) => {
+  e.preventDefault();
+  procesarArchivo(e.dataTransfer.files && e.dataTransfer.files[0]);
+});
+
+// Ctrl+V con una captura en el portapapeles, con el modal abierto
+document.addEventListener('paste', (e) => {
+  if ($('modalPegar').classList.contains('oculto')) return;
+  const item = Array.from(e.clipboardData.items || [])
+    .find((i) => i.kind === 'file' && (/^image\//.test(i.type) || i.type === 'application/pdf'));
+  if (!item) return; // texto pegado: lo gestiona el textarea
+  e.preventDefault();
+  procesarArchivo(item.getAsFile());
+});
+
+// ---------- Modal: importar citas ----------
 function abrirModal() {
   $('areaPegar').value = '';
   $('pegarPreview').textContent = '';
   $('pegarPreview').className = 'pegar-preview';
+  $('archivoEstado').textContent = '';
+  $('archivoEstado').className = 'pegar-preview';
   $('modalPegar').classList.remove('oculto');
   $('areaPegar').focus();
 }
@@ -312,7 +422,7 @@ $('btnImportar').addEventListener('click', () => {
   guardar();
   pintarTabla();
   cerrarModal();
-  log(`Importadas ${filas.length} cita(s) desde texto pegado.`, 'ok');
+  log(`Importadas ${filas.length} cita(s) desde texto o imagen.`, 'ok');
 });
 
 // ---------- Eventos en vivo del servidor (SSE) ----------

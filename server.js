@@ -307,6 +307,12 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'renderer')));
 
+// Librerías para importar PDF/imagen, servidas en local (sin depender de internet)
+app.use('/vendor/pdfjs', express.static(path.join(__dirname, 'node_modules', 'pdfjs-dist', 'build')));
+app.use('/vendor/tesseract', express.static(path.join(__dirname, 'node_modules', 'tesseract.js', 'dist')));
+app.use('/vendor/tesseract-core', express.static(path.join(__dirname, 'node_modules', 'tesseract.js-core')));
+app.use('/vendor/tessdata', express.static(path.join(__dirname, 'vendor', 'tessdata')));
+
 // Flujo de eventos en vivo (QR, estado, log, progreso)
 app.get('/api/events', (req, res) => {
   res.set({
