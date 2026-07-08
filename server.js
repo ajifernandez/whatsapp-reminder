@@ -20,7 +20,7 @@ const sseClients = new Set(); // conexiones del navegador para eventos en vivo
 // ---------- Datos ----------
 function seedCitasSiHaceFalta() {
   if (fs.existsSync(CITAS_PATH)) return;
-  const semilla = [  ];
+  const semilla = [];
   fs.writeFileSync(CITAS_PATH, JSON.stringify(semilla, null, 2), 'utf8');
 }
 
@@ -83,26 +83,66 @@ function emitir(evento, datos) {
   }
 }
 
-// ---------- Mensajería ----------
+// ---------- Mensajería & Parseo Agnóstico ----------
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-// convierte "2026-07-03" en "Viernes 3 Julio"; si no es una fecha válida la deja tal cual
+// Elimina espacios raros, dobles y caracteres ocultos de control (ej: \u200e de Windows/Excel)
+function limpiarString(str) {
+  if (!str) return '';
+  return String(str).replace(/[\u200e\u200f\u202a-\u202e]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// Convierte de manera robusta "2026-07-03" o "03/07/2026" en "Viernes 3 Julio"
 function formatearFecha(fecha) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(fecha).trim());
-  if (!m) return fecha;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  if (d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3])) return fecha;
-  return `${DIAS_SEMANA[d.getDay()]} ${d.getDate()} ${MESES[d.getMonth()]}`;
+  const limpia = limpiarString(fecha);
+
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(limpia);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3])) {
+      return `${DIAS_SEMANA[d.getDay()]} ${d.getDate()} ${MESES[d.getMonth()]}`;
+    }
+  }
+
+  m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(limpia);
+  if (m) {
+    const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+    if (d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[1])) {
+      return `${DIAS_SEMANA[d.getDay()]} ${d.getDate()} ${MESES[d.getMonth()]}`;
+    }
+  }
+
+  return limpia;
+}
+
+// Convierte formatos mixtos 12H (am/pm, a.m.) o 24H limpios a HH:MM estricto de 24 horas
+function normalizarHoraA24(horaStr) {
+  let limpia = limpiarString(horaStr).toLowerCase();
+  if (!limpia) return null;
+
+  const match12 = /^(\d{1,2}):(\d{2})\s*(am|pm|a\.\s*m\.|p\.\s*m\.)?$/.exec(limpia);
+  if (match12) {
+    let horas = parseInt(match12[1], 10);
+    const minutos = match12[2];
+    const sufijo = match12[3];
+
+    if (sufijo) {
+      if ((sufijo.includes('p') || sufijo.includes('pm')) && horas < 12) horas += 12;
+      if ((sufijo.includes('a') || sufijo.includes('am')) && horas === 12) horas = 0;
+    }
+    return `${String(horas).padStart(2, '0')}:${minutos}`;
+  }
+  return limpia;
 }
 
 function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
   const valores = {
-    nombre: cita.nombre || '',
-    telefono: cita.telefono || '',
+    nombre: limpiarString(cita.nombre),
+    telefono: limpiarString(cita.telefono),
     fecha: cita.fecha ? formatearFecha(cita.fecha) : '',
-    hora: cita.hora || '',
-    especialidad: cita.especialidad || 'salud'
+    hora: normalizarHoraA24(cita.hora) || '',
+    especialidad: limpiarString(cita.especialidad) || 'salud'
   };
 
   return plantilla.replace(/\{(nombre|telefono|fecha|hora|especialidad)\}/gi, (_match, campo) => valores[campo.toLowerCase()] ?? '');
@@ -113,10 +153,16 @@ function crearClienteSiHaceFalta() {
   if (client) return;
 
   client = new Client({
-    authStrategy: new LocalAuth({ dataPath: AUTH_PATH }),
+    authStrategy: new LocalAuth({ dataPath: path.resolve(AUTH_PATH) }),
     puppeteer: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-extensions',
+        '--disable-gpu',
+        '--disable-dev-shm-usage'
+      ]
     }
   });
 
@@ -187,7 +233,7 @@ async function enviarUna(cita, mensaje) {
   let numeroId = null;
   try { numeroId = await client.getNumberId(numero); } catch (_) { /* número no válido */ }
   if (!numeroId) {
-    emitir('log', { tipo: 'aviso', texto: `${cita.nombre} (${cita.telefono}): el número no es válido o no tiene WhatsApp, no se envió.` });
+    emitir('log', { tipo: 'aviso', texto: `${cita.nombre || 'Sin nombre'} (${cita.telefono}): el número no es válido o no tiene WhatsApp, no se envió.` });
     return 'omitido';
   }
 
@@ -242,7 +288,7 @@ async function enviarRecordatorios(citas) {
     }
 
     // pausa aleatoria entre envíos para no parecer envío masivo (riesgo de bloqueo del número)
-    if (enviados + fallidos > 0) await pausa(2000 + Math.random() * 3000);
+    if (enviados + fallidos > 0) await pausa(2500 + Math.random() * 2500);
 
     const resultado = await enviarUna(cita, mensaje);
     porEstado[resultado].push(cita);
@@ -260,13 +306,35 @@ async function enviarRecordatorios(citas) {
 
 // ---------- Envío automático (24 h antes de la cita) ----------
 const HORAS_ANTELACION = 24;
-const INTERVALO_AUTO_MS = 60 * 1000;
+const INTERVALO_AUTO_MS = 45 * 1000;
 
 function fechaHoraCita(cita) {
-  const f = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(cita.fecha || '').trim());
-  const h = /^(\d{1,2}):(\d{2})$/.exec(String(cita.hora || '').trim());
-  if (!f || !h) return null;
-  const d = new Date(Number(f[1]), Number(f[2]) - 1, Number(f[3]), Number(h[1]), Number(h[2]));
+  const fLimpia = limpiarString(cita.fecha);
+  const hLimpia = normalizarHoraA24(cita.hora);
+  if (!fLimpia || !hLimpia) return null;
+
+  let anio, mes, dia;
+
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fLimpia);
+  if (m) {
+    anio = Number(m[1]);
+    mes = Number(m[2]) - 1;
+    dia = Number(m[3]);
+  } else {
+    m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(fLimpia);
+    if (m) {
+      anio = Number(m[3]);
+      mes = Number(m[2]) - 1;
+      dia = Number(m[1]);
+    } else {
+      return null;
+    }
+  }
+
+  const hMatch = /^(\d{2}):(\d{2})$/.exec(hLimpia);
+  if (!hMatch) return null;
+
+  const d = new Date(anio, mes, dia, Number(hMatch[1]), Number(hMatch[2]));
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
@@ -291,7 +359,7 @@ async function cicloAutoEnvio() {
     emitir('log', { tipo: 'info', texto: `Envío automático: ${pendientes.length} cita(s) a menos de ${HORAS_ANTELACION} h.` });
     for (let i = 0; i < pendientes.length; i++) {
       if (!clientReady) break;
-      if (i > 0) await pausa(2000 + Math.random() * 3000);
+      if (i > 0) await pausa(2500 + Math.random() * 2500);
       const resultado = await enviarUna(pendientes[i], config.mensaje);
       // se marca también si falló, para no reintentar cada minuto y saturar
       marcarEstadoEnvio([pendientes[i]], resultado);
@@ -357,11 +425,10 @@ app.post('/api/enviar', async (req, res) => {
   }
 });
 
-const server = app.listen(PORT, '127.0.0.1', () => {
+const server = app.listen(PORT, () => {
   console.log('==================================================');
-  console.log('  Recordatorios WhatsApp en marcha');
-  console.log(`  Abre en el navegador:  http://localhost:${PORT}`);
-  console.log('  (deja esta ventana abierta mientras uses la app)');
+  console.log('  Recordatorios WhatsApp Multiplataforma');
+  console.log(`  Abre en tu navegador: http://localhost:${PORT}`);
   console.log('==================================================');
 });
 
@@ -370,22 +437,23 @@ let cerrando = false;
 async function apagar(motivo) {
   if (cerrando) return;
   cerrando = true;
-  console.log(`\nCerrando (${motivo})...`);
+  console.log(`\nCerrando de forma segura (${motivo})...`);
 
   // cerrar conexiones SSE abiertas
   for (const res of sseClients) {
     try { res.end(); } catch (_) { /* ignorar */ }
   }
-  server.close();
+
+  await new Promise((resolve) => server.close(() => resolve()));
 
   // destruir el cliente WhatsApp mata el Chromium de Puppeteer
   if (client) {
-    try { await client.destroy(); } catch (_) { /* ignorar */ }
+    try {
+      await client.destroy();
+      console.log('Procesos de Chromium cerrados correctamente.');
+    } catch (_) { /* ignorar */ }
   }
 
-  // salir aunque algo quede colgado
-  const forzar = setTimeout(() => process.exit(0), 4000);
-  forzar.unref();
   process.exit(0);
 }
 

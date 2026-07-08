@@ -83,6 +83,26 @@ main { max-width: 960px; margin: 22px auto; padding: 0 20px; display: flex; flex
 .mensaje-plantilla:focus { border-color: var(--azul); outline: none; }
 .ayuda-mensaje { color: var(--texto-sub); font-size: 13px; margin: 8px 0 0; }
 .ayuda-mensaje code { background: var(--fondo); padding: 1px 5px; border-radius: 4px; }
+.mensaje-preview {
+  margin-top: 12px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.mensaje-preview-titulo {
+  color: #166534;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.mensaje-preview-texto {
+  white-space: pre-wrap;
+  color: var(--texto);
+  line-height: 1.45;
+  font-size: 14px;
+}
+.mensaje-preview-texto.vacio-preview { color: var(--texto-sub); }
 
 /* Botones */
 .botones { display: flex; gap: 10px; flex-wrap: wrap; }
