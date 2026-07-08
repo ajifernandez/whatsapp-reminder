@@ -79,6 +79,83 @@ function pintarEstado(tr, cita) {
   else { td.textContent = ''; td.title = ''; }
 }
 
+const DIAS_PREVIEW = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const MESES_PREVIEW = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+function limpiarPreviewString(str) {
+  if (!str) return '';
+  return String(str).replace(/[\u200e\u200f\u202a-\u202e]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function formatearFechaPreview(fecha) {
+  const limpia = limpiarPreviewString(fecha);
+
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(limpia);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3])) {
+      return `${DIAS_PREVIEW[d.getDay()]} ${d.getDate()} ${MESES_PREVIEW[d.getMonth()]}`;
+    }
+  }
+
+  m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(limpia);
+  if (m) {
+    const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+    if (d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[1])) {
+      return `${DIAS_PREVIEW[d.getDay()]} ${d.getDate()} ${MESES_PREVIEW[d.getMonth()]}`;
+    }
+  }
+
+  return limpia;
+}
+
+function normalizarHoraPreview(horaStr) {
+  let limpia = limpiarPreviewString(horaStr).toLowerCase();
+  if (!limpia) return null;
+
+  const match12 = /^(\d{1,2}):(\d{2})\s*(am|pm|a\.\s*m\.|p\.\s*m\.)?$/.exec(limpia);
+  if (match12) {
+    let horas = parseInt(match12[1], 10);
+    const minutos = match12[2];
+    const sufijo = match12[3];
+
+    if (sufijo) {
+      if ((sufijo.includes('p') || sufijo.includes('pm')) && horas < 12) horas += 12;
+      if ((sufijo.includes('a') || sufijo.includes('am')) && horas === 12) horas = 0;
+    }
+    return `${String(horas).padStart(2, '0')}:${minutos}`;
+  }
+  return limpia;
+}
+
+function formatearMensajePreview(cita, plantilla) {
+  const valores = {
+    nombre: limpiarPreviewString(cita.nombre),
+    telefono: limpiarPreviewString(cita.telefono),
+    fecha: cita.fecha ? formatearFechaPreview(cita.fecha) : '',
+    hora: normalizarHoraPreview(cita.hora) || '',
+    especialidad: limpiarPreviewString(cita.especialidad) || 'salud'
+  };
+
+  return plantilla.replace(/\{(nombre|telefono|fecha|hora|especialidad)\}/gi, (_match, campo) => valores[campo.toLowerCase()] ?? '');
+}
+
+function actualizarPreviewMensaje() {
+  const preview = $('mensajePreview');
+  if (!preview) return;
+
+  if (citas.length === 0) {
+    preview.textContent = 'Añade o importa una cita para ver la vista previa.';
+    preview.classList.add('vacio-preview');
+    return;
+  }
+
+  const plantilla = $('mensajePlantilla').value || config.mensaje || '';
+  const texto = formatearMensajePreview(citas[0], plantilla);
+  preview.textContent = texto || 'La plantilla está vacía.';
+  preview.classList.toggle('vacio-preview', !texto);
+}
+
 function pintarTabla() {
   const tbody = $('tbody');
   tbody.innerHTML = '';
@@ -101,6 +178,7 @@ function pintarTabla() {
           pintarEstado(tr, citas[idx]);
         }
         guardar();
+        actualizarPreviewMensaje();
       });
       td.appendChild(input);
       tr.appendChild(td);
@@ -128,6 +206,7 @@ function pintarTabla() {
 
   $('vacio').classList.toggle('oculto', citas.length > 0);
   actualizarBotonEnviar();
+  actualizarPreviewMensaje();
 }
 
 let guardarTimer = null;
@@ -143,9 +222,11 @@ async function guardarMensajeAhora() {
   config.mensaje = $('mensajePlantilla').value;
   config = await api.guardarConfig(config);
   $('mensajePlantilla').value = config.mensaje;
+  actualizarPreviewMensaje();
 }
 
 function guardarMensaje() {
+  actualizarPreviewMensaje();
   clearTimeout(guardarConfigTimer);
   guardarConfigTimer = setTimeout(() => {
     guardarMensajeAhora().catch((err) => log(err.message, 'error'));
