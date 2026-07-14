@@ -37,7 +37,7 @@ El mensaje que se envía:
 
 Al pulsar **Iniciar**, la app se conecta a GitHub y descarga sola la última versión del código antes de arrancar (si no hay internet, sigue con la versión actual). También hay un botón **⟳ Actualizar** en la cabecera para buscar cambios sin reiniciar.
 
-- Solo se actualiza el código (`server.js`, `update.js`, `renderer/`, `package.json`); nunca los datos, la sesión ni los binarios empaquetados.
+- Se actualizan el código y los documentos (`server.js`, `update.js`, `renderer/`, `package.json`, `README.md`, `MANUAL_USUARIO.md`); nunca los datos, la sesión ni los binarios empaquetados.
 - Requiere que el repo sea **público**: <https://github.com/ajifernandez/whatsapp-reminder>
 
 **Para publicar una nueva versión** (desarrollador): sube el número de `version` en `package.json` y haz `git push`. Los equipos se actualizan al reiniciar. El updater solo aplica versiones **mayores** que la instalada.

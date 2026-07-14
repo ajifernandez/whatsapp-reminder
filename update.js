@@ -26,6 +26,8 @@ const ARCHIVOS = [
   'server.js',
   'update.js',
   'package.json',
+  'README.md',
+  'MANUAL_USUARIO.md',
   'renderer/index.html',
   'renderer/renderer.js',
   'renderer/parser.js',
