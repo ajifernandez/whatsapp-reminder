@@ -7,7 +7,7 @@
 # Este objetivo solo refresca el codigo fuente y vuelve a comprimir el ZIP.
 
 PORTABLE_DIR := dist/whatsapp-reminder-portable
-ZIP_NAME     := whatsapp-reminder-portable_v3.zip
+ZIP_NAME     := whatsapp-reminder-portable.zip
 ZIP          := dist/$(ZIP_NAME)
 
 # Ficheros sueltos de codigo/doc que se copian de la raiz al portable.
