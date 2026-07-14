@@ -30,7 +30,17 @@ const api = {
     if (!r.ok) throw new Error(data.error || 'Error al enviar');
     return data;
   }),
-  estado: () => fetch('/api/estado').then((r) => r.json()).then((d) => d.estado)
+  estado: () => fetch('/api/estado').then((r) => r.json()).then((d) => d.estado),
+  buscarActualizacion: () => fetch('/api/actualizacion').then(async (r) => {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo comprobar');
+    return data;
+  }),
+  actualizar: () => fetch('/api/actualizar', { method: 'POST' }).then(async (r) => {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo actualizar');
+    return data;
+  })
 };
 
 // El parseo (pegado Excel/CSV y texto libre de PDF/OCR) vive en parser.js,
@@ -315,6 +325,26 @@ $('btnEnviar').addEventListener('click', async () => {
 
 $('btnLimpiarLog').addEventListener('click', () => { $('log').innerHTML = ''; });
 
+$('btnActualizar').addEventListener('click', async () => {
+  const btn = $('btnActualizar');
+  btn.disabled = true;
+  try {
+    log('Comprobando actualizaciones...', 'info');
+    const info = await api.buscarActualizacion();
+    if (!info.hayActualizacion) {
+      log(`Ya tienes la última versión (${info.local}).`, 'ok');
+      return;
+    }
+    log(`Nueva versión ${info.remota} disponible. Descargando...`, 'info');
+    const r = await api.actualizar();
+    log(`Actualizado a la versión ${r.version}. Cierra y vuelve a abrir la aplicación para aplicar los cambios.`, 'ok');
+  } catch (err) {
+    log('No se pudo actualizar: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 $('mensajePlantilla').addEventListener('input', guardarMensaje);
 
 $('chkAutoEnvio').addEventListener('change', async () => {
@@ -546,4 +576,13 @@ function conectarEventos() {
   pintarTabla();
   setEstado(estadoInicial);
   conectarEventos();
+
+  // Aviso no intrusivo si hay version nueva (el arranque ya intenta bajarla).
+  api.buscarActualizacion()
+    .then((info) => {
+      if (info.hayActualizacion) {
+        log(`Hay una versión nueva (${info.remota}). Pulsa «⟳ Actualizar» o reinicia la aplicación.`, 'aviso');
+      }
+    })
+    .catch(() => { /* sin conexion: ignorar */ });
 })();

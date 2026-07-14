@@ -20,6 +20,9 @@ if not exist node_modules (
   )
 )
 
+echo Buscando actualizaciones...
+node update.js
+
 echo Abriendo http://localhost:3000 en el navegador...
 start "" http://localhost:3000
 node server.js

@@ -13,6 +13,9 @@ if [ ! -d node_modules ]; then
   npm install || { echo "Falló la instalación."; read -r -p "Enter para salir..."; exit 1; }
 fi
 
+echo "Buscando actualizaciones..."
+node update.js
+
 URL="http://localhost:3000"
 
 # Abrir el navegador cuando el servidor esté listo

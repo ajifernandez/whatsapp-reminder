@@ -9,6 +9,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CITAS_PATH = path.join(DATA_DIR, 'citas.json');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
+const CACHE_PATH = path.join(__dirname, '.wwebjs_cache');
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -149,11 +150,28 @@ function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
 }
 
 // ---------- Cliente WhatsApp ----------
+// Borra cache de version web de WhatsApp. En Windows (sobre todo version
+// portable) una escritura interrumpida deja este cache corrupto y el cliente
+// se queda colgado al iniciar sin emitir 'qr' ni 'ready'. Limpiar antes de
+// arrancar evita tener que borrar la carpeta a mano.
+function limpiarCacheWeb() {
+  try {
+    if (fs.existsSync(CACHE_PATH)) {
+      fs.rmSync(CACHE_PATH, { recursive: true, force: true });
+    }
+  } catch (err) {
+    emitir('log', { tipo: 'error', texto: 'No se pudo limpiar cache: ' + err.message });
+  }
+}
+
 function crearClienteSiHaceFalta() {
   if (client) return;
 
+  limpiarCacheWeb();
+
   client = new Client({
     authStrategy: new LocalAuth({ dataPath: path.resolve(AUTH_PATH) }),
+    webVersionCache: { type: 'none' },
     puppeteer: {
       headless: true,
       args: [
@@ -422,6 +440,32 @@ app.post('/api/enviar', async (req, res) => {
     res.json(resultado);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- Actualizaciones ----------
+const updater = require('./update.js');
+
+app.get('/api/actualizacion', async (_req, res) => {
+  try {
+    res.json(await updater.buscarActualizacion());
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Aplica la actualizacion. server.js ya esta cargado en memoria, asi que los
+// cambios de codigo del servidor tienen efecto al reiniciar; los de renderer
+// se ven al recargar el navegador.
+app.post('/api/actualizar', async (_req, res) => {
+  try {
+    const { hayActualizacion, remota } = await updater.buscarActualizacion();
+    if (!hayActualizacion) return res.json({ actualizado: false, version: remota });
+    const archivos = await updater.aplicarActualizacion();
+    emitir('log', { tipo: 'ok', texto: `Actualizado a la version ${remota}. Reinicia la aplicacion para aplicar los cambios.` });
+    res.json({ actualizado: true, version: remota, archivos });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });
 
