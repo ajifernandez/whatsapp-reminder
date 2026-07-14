@@ -9,6 +9,8 @@ Usa [`whatsapp-web.js`](https://github.com/pedroslopez/whatsapp-web.js) por deba
 - Tabla visual para añadir, editar y borrar citas (se guarda sola).
 - Botón **Conectar WhatsApp** que muestra un QR en pantalla (solo la primera vez).
 - Botón **Enviar recordatorios** que manda un mensaje a cada cita, con barra de progreso y registro de resultados en vivo.
+- Importar citas desde **Excel, PDF o imagen** (OCR) además de a mano.
+- **Auto-actualización** desde GitHub: al iniciar se trae la última versión sola.
 
 El mensaje que se envía:
 
@@ -28,6 +30,17 @@ El mensaje que se envía:
 
 > El teléfono con WhatsApp debe estar encendido y con internet.
 > Para cerrar, cierra la pestaña del navegador y la ventana negra del servidor.
+
+---
+
+## Actualizaciones automáticas
+
+Al pulsar **Iniciar**, la app se conecta a GitHub y descarga sola la última versión del código antes de arrancar (si no hay internet, sigue con la versión actual). También hay un botón **⟳ Actualizar** en la cabecera para buscar cambios sin reiniciar.
+
+- Solo se actualiza el código (`server.js`, `update.js`, `renderer/`, `package.json`); nunca los datos, la sesión ni los binarios empaquetados.
+- Requiere que el repo sea **público**: <https://github.com/ajifernandez/whatsapp-reminder>
+
+**Para publicar una nueva versión** (desarrollador): sube el número de `version` en `package.json` y haz `git push`. Los equipos se actualizan al reiniciar. El updater solo aplica versiones **mayores** que la instalada.
 
 ---
 
@@ -62,8 +75,10 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 ## Estructura del proyecto
 
 - `server.js` — servidor web local (Express) + lógica de WhatsApp.
-- `renderer/` — interfaz del navegador (`index.html`, `styles.css`, `renderer.js`).
+- `update.js` — auto-actualizador desde GitHub (se ejecuta antes de `server.js`).
+- `renderer/` — interfaz del navegador (`index.html`, `styles.css`, `renderer.js`, `parser.js`).
 - `Iniciar.bat` / `Iniciar.sh` — lanzadores de doble clic (Windows / Linux).
+- `Makefile` — `make prepare_portable_dist` regenera el ZIP portable de Windows.
 - `package.json` — dependencias.
 
 ## Limitaciones
