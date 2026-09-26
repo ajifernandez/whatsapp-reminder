@@ -232,6 +232,7 @@ function crearClienteSiHaceFalta() {
   client.on('authenticated', () => emitir('log', { tipo: 'info', texto: 'Autenticado, conectando...' }));
 
   client.on('ready', () => {
+    pararTemporizadorConexion();
     clientReady = true;
     ultimoError = null; // la conexión funcionó: el error anterior ya no aplica
     emitir('estado', 'conectado');
@@ -239,12 +240,14 @@ function crearClienteSiHaceFalta() {
   });
 
   client.on('auth_failure', (msg) => {
+    pararTemporizadorConexion();
     clientReady = false;
     emitir('estado', 'error');
     emitir('log', { tipo: 'error', texto: 'Error de autenticación: ' + msg });
   });
 
   client.on('disconnected', (reason) => {
+    pararTemporizadorConexion();
     clientReady = false;
     emitir('estado', 'desconectado');
     emitir('log', { tipo: 'error', texto: 'Sesión desconectada: ' + reason });
@@ -253,8 +256,17 @@ function crearClienteSiHaceFalta() {
 }
 
 const COOLDOWN_RECONEXION_MS = 30 * 1000; // evita reintentos en bucle (posible causa de bloqueo)
+const TIMEOUT_CONEXION_MS = 60 * 1000; // si no conecta en este tiempo, se cancela en vez de colgarse para siempre
 let ultimoIntentoConexion = 0;
 let conectando = false;
+let temporizadorConexion = null;
+
+function pararTemporizadorConexion() {
+  if (temporizadorConexion) {
+    clearTimeout(temporizadorConexion);
+    temporizadorConexion = null;
+  }
+}
 
 async function iniciarSesion() {
   if (clientReady) {
@@ -278,6 +290,20 @@ async function iniciarSesion() {
   conectando = true;
   crearClienteSiHaceFalta();
   emitir('estado', 'conectando');
+
+  // Si whatsapp-web.js/puppeteer se cuelga cargando la página (pasa a veces),
+  // client.initialize() no rechaza ni resuelve nunca: sin este límite se
+  // quedaría en "Conectando..." para siempre, sin avisar ni dejar reintentar.
+  temporizadorConexion = setTimeout(() => {
+    if (clientReady) return;
+    emitir('estado', 'error');
+    emitir('log', { tipo: 'error', texto: `La conexión tardó más de ${TIMEOUT_CONEXION_MS / 1000}s y se canceló. Pulsa "Conectar WhatsApp" para reintentar.` });
+    const clienteColgado = client;
+    client = null;
+    conectando = false;
+    if (clienteColgado) clienteColgado.destroy().catch(() => {});
+  }, TIMEOUT_CONEXION_MS);
+
   client.initialize().catch((err) => {
     emitir('estado', 'error');
     emitir('log', { tipo: 'error', texto: 'Error al iniciar: ' + err.message });
