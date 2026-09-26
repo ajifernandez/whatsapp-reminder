@@ -23,6 +23,19 @@
   </header>
 
   <main>
+    <!-- Aviso de último problema, con ayuda para resolverlo -->
+    <div id="bannerError" class="banner-error oculto">
+      <div class="banner-error-cabecera">
+        <span class="banner-error-icono">⚠️</span>
+        <span id="bannerErrorTexto" class="banner-error-texto"></span>
+        <div class="banner-error-botones">
+          <button id="btnBannerFix" class="btn btn-azul pequeno">¿Cómo lo arreglo?</button>
+          <button id="btnBannerCerrar" class="btn btn-gris pequeno" title="Cerrar aviso">✕</button>
+        </div>
+      </div>
+      <div id="bannerErrorDetalle" class="banner-error-detalle oculto"></div>
+    </div>
+
     <!-- Panel de conexión -->
     <section class="tarjeta conexion">
       <div class="conexion-info">

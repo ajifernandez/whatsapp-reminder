@@ -254,8 +254,128 @@ function log(texto, tipo = 'info') {
   li.className = tipo;
   const hora = new Date().toLocaleTimeString('es-ES');
   li.textContent = `[${hora}] ${texto}`;
+  if (tipo === 'error') {
+    li.classList.add('log-clicable');
+    li.title = 'Clic para ver cómo arreglarlo';
+    li.addEventListener('click', () => mostrarBannerError(texto));
+  }
   $('log').prepend(li);
+  if (tipo === 'error') mostrarBannerError(texto);
 }
+
+// ---------- Diccionario de errores conocidos ----------
+// Cada entrada: patrón que reconoce el texto del error (tal cual llega del
+// backend) y pasos en lenguaje simple para resolverlo, sin jerga técnica.
+const GUIA_ERRORES = [
+  {
+    patron: /no se pudo generar el qr/i,
+    titulo: 'No se pudo generar el código QR',
+    pasos: [
+      'Pulsa <b>Cerrar sesión</b> y luego <b>Conectar WhatsApp</b> otra vez.',
+      'Comprueba que tienes conexión a internet.',
+      'Si sigue fallando, cierra la aplicación por completo y vuelve a abrirla.',
+    ],
+  },
+  {
+    patron: /error de autenticación/i,
+    titulo: 'Fallo al autenticar con WhatsApp',
+    pasos: [
+      'El vínculo con tu WhatsApp ha caducado o se ha roto.',
+      'Pulsa <b>Cerrar sesión</b>, luego <b>Conectar WhatsApp</b> y escanea el QR de nuevo.',
+    ],
+  },
+  {
+    patron: /sesión desconectada/i,
+    titulo: 'WhatsApp se ha desconectado',
+    pasos: [
+      'Puede deberse a que desvinculaste el dispositivo desde el móvil (WhatsApp → Dispositivos vinculados).',
+      'Pulsa <b>Conectar WhatsApp</b> y vincula de nuevo escaneando el QR.',
+    ],
+  },
+  {
+    patron: /no se pudo limpiar cache/i,
+    titulo: 'No se pudo limpiar la caché interna',
+    pasos: [
+      'Cierra la aplicación por completo.',
+      'Vuelve a abrirla e inténtalo de nuevo.',
+      'Si persiste, puede que otro proceso tenga el archivo abierto: reinicia el ordenador.',
+    ],
+  },
+  {
+    patron: /no es válido o no tiene whatsapp/i,
+    titulo: 'Número no válido o sin WhatsApp',
+    pasos: [
+      'Revisa que el teléfono tenga el prefijo de país (ej. <code>34</code> para España).',
+      'Confirma que ese número tiene WhatsApp instalado.',
+      'Corrígelo en la tabla de citas y vuelve a enviar solo esa fila.',
+    ],
+  },
+  {
+    patron: /enoent|no such file|executablepath|chrome|chromium/i,
+    titulo: 'No se encuentra el navegador interno (Chrome/Chromium)',
+    pasos: [
+      'La app necesita un Chrome/Chromium instalado para conectar con WhatsApp.',
+      'Cierra la aplicación y reinstala las dependencias con <code>npm install</code> (o pide ayuda técnica si no sabes usar la consola).',
+      'Si acabas de mover la carpeta de la aplicación a otro sitio, vuelve a instalarla desde cero.',
+    ],
+  },
+  {
+    patron: /net::err|enotfound|econnrefused|timeout|timed out/i,
+    titulo: 'Problema de conexión a internet',
+    pasos: [
+      'Comprueba que el ordenador tiene internet.',
+      'Espera un minuto y pulsa <b>Conectar WhatsApp</b> de nuevo.',
+      'Si usas una red de empresa, puede que un firewall bloquee la conexión: consulta con tu soporte técnico.',
+    ],
+  },
+  {
+    patron: /protocol error|execution context was destroyed|session closed|target closed/i,
+    titulo: 'La conexión interna con WhatsApp se cortó',
+    pasos: [
+      'Esto suele pasar si el ordenador se quedó sin memoria o se cerró de golpe.',
+      'Cierra la aplicación por completo y vuelve a abrirla.',
+      'Pulsa <b>Conectar WhatsApp</b> otra vez.',
+    ],
+  },
+];
+
+function buscarGuiaError(texto) {
+  return GUIA_ERRORES.find((g) => g.patron.test(texto)) || null;
+}
+
+function mostrarBannerError(texto) {
+  const guia = buscarGuiaError(texto);
+  $('bannerError').classList.remove('oculto');
+  $('bannerErrorTexto').textContent = texto;
+  const detalle = $('bannerErrorDetalle');
+  const pasosHtml = (guia ? guia.pasos : [
+    'Vuelve a intentar la acción que falló.',
+    'Si se repite, cierra la aplicación por completo y ábrela de nuevo.',
+    'Si sigue sin funcionar, revisa el archivo <code>data/app.log</code> (tiene el detalle técnico) o pide ayuda mostrando ese archivo.',
+  ]).map((p) => `<li>${p}</li>`).join('');
+  detalle.innerHTML = `
+    <h3>${guia ? guia.titulo : 'No hemos reconocido este error automáticamente'}</h3>
+    <ol>${pasosHtml}</ol>
+    <button id="btnCopiarError" class="btn btn-gris pequeno banner-error-copiar">📋 Copiar detalle técnico</button>
+  `;
+  const btnCopiar = document.getElementById('btnCopiarError');
+  if (btnCopiar) {
+    btnCopiar.addEventListener('click', () => {
+      navigator.clipboard?.writeText(texto).then(() => {
+        btnCopiar.textContent = '✅ Copiado';
+        setTimeout(() => { btnCopiar.textContent = '📋 Copiar detalle técnico'; }, 1500);
+      }).catch(() => {});
+    });
+  }
+}
+
+$('btnBannerFix').addEventListener('click', () => {
+  $('bannerErrorDetalle').classList.toggle('oculto');
+});
+$('btnBannerCerrar').addEventListener('click', () => {
+  $('bannerError').classList.add('oculto');
+  $('bannerErrorDetalle').classList.add('oculto');
+});
 
 // ---------- Estado de conexión ----------
 function setEstado(estado) {
@@ -575,8 +695,8 @@ function conectarEventos() {
   $('chkAutoEnvio').checked = !!config.autoEnvio;
   pintarTabla();
   setEstado(estadoInicial.estado);
-  if (estadoInicial.ultimoError) {
-    log('Último error registrado: ' + estadoInicial.ultimoError + ' (detalle en data/app.log)', 'error');
+  if (estadoInicial.ultimoError && estadoInicial.estado !== 'conectado') {
+    log('Último error registrado: ' + estadoInicial.ultimoError, 'error');
   }
   conectarEventos();
 
