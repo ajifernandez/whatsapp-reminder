@@ -396,7 +396,8 @@ function iniciarTemporizadorConectando() {
   const actualizar = () => {
     const s = Math.round((Date.now() - inicio) / 1000);
     let texto = `Conectando... (${s}s)`;
-    if (s >= 8) texto += ' — puede tardar hasta 30-40s la primera vez';
+    if (s >= 8) texto += ' — puede tardar hasta 60s la primera vez';
+    if (s >= 55) texto += ', si se pasa de ese tiempo se cancelará sola';
     $('estadoTexto').textContent = texto;
   };
   actualizar();
