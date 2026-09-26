@@ -114,6 +114,7 @@ main { max-width: 960px; margin: 22px auto; padding: 0 20px; display: flex; flex
 }
 .mensaje-plantilla:focus { border-color: var(--azul); outline: none; }
 .ayuda-mensaje { color: var(--texto-sub); font-size: 13px; margin: 8px 0 0; }
+.nota-envio { color: var(--texto-sub); font-size: 13px; margin: 8px 0 0; }
 .ayuda-mensaje code { background: var(--fondo); padding: 1px 5px; border-radius: 4px; }
 .mensaje-preview {
   margin-top: 12px;

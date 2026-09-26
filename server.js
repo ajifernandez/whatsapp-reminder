@@ -252,17 +252,32 @@ function crearClienteSiHaceFalta() {
   });
 }
 
+const COOLDOWN_RECONEXION_MS = 30 * 1000; // evita reintentos en bucle (posible causa de bloqueo)
+let ultimoIntentoConexion = 0;
+let conectando = false;
+
 async function iniciarSesion() {
-  crearClienteSiHaceFalta();
   if (clientReady) {
     emitir('estado', 'conectado');
     return;
   }
+  if (conectando) return; // ya hay un intento en curso
+
+  const ahora = Date.now();
+  const restante = COOLDOWN_RECONEXION_MS - (ahora - ultimoIntentoConexion);
+  if (restante > 0) {
+    emitir('log', { tipo: 'aviso', texto: `Espera ${Math.ceil(restante / 1000)} s antes de reintentar conectar (evita bloqueos por reintentos seguidos).` });
+    return;
+  }
+
+  ultimoIntentoConexion = ahora;
+  conectando = true;
+  crearClienteSiHaceFalta();
   emitir('estado', 'conectando');
   client.initialize().catch((err) => {
     emitir('estado', 'error');
     emitir('log', { tipo: 'error', texto: 'Error al iniciar: ' + err.message });
-  });
+  }).finally(() => { conectando = false; });
 }
 
 async function cerrarSesion() {
@@ -276,6 +291,9 @@ async function cerrarSesion() {
 }
 
 const pausa = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
+
+const PAUSA_LARGA_CADA = 20; // envíos entre cada pausa larga
+const PAUSA_LARGA_MS = 30 * 1000; // duración de la pausa larga
 
 // envía el recordatorio de una cita; devuelve 'enviado' | 'omitido' | 'fallido'
 async function enviarUna(cita, mensaje) {
@@ -342,8 +360,18 @@ async function enviarRecordatorios(citas) {
       continue;
     }
 
-    // pausa aleatoria entre envíos para no parecer envío masivo (riesgo de bloqueo del número)
-    if (enviados + fallidos > 0) await pausa(2500 + Math.random() * 2500);
+    // pausa aleatoria entre envíos para no parecer envío masivo (riesgo de bloqueo del número).
+    // Cada PAUSA_LARGA_CADA envíos se hace una pausa mucho más larga, simulando uso humano
+    // (WhatsApp puede bloquear números que mandan mensajes seguidos sin descanso).
+    const hechos = enviados + fallidos;
+    if (hechos > 0) {
+      if (hechos % PAUSA_LARGA_CADA === 0) {
+        emitir('log', { tipo: 'info', texto: `Pausa de seguridad (${Math.round(PAUSA_LARGA_MS / 1000)} s) tras ${hechos} envíos para evitar bloqueos.` });
+        await pausa(PAUSA_LARGA_MS);
+      } else {
+        await pausa(2500 + Math.random() * 2500);
+      }
+    }
 
     const resultado = await enviarUna(cita, mensaje);
     porEstado[resultado].push(cita);
