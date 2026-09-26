@@ -15,6 +15,38 @@
 
 * { box-sizing: border-box; }
 
+.banner-error {
+  margin: 16px 24px 0;
+  background: #fff5f5;
+  border: 1px solid #feb2b2;
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.banner-error.oculto { display: none; }
+.banner-error-cabecera {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.banner-error-icono { font-size: 18px; }
+.banner-error-texto { flex: 1; font-size: 14px; color: var(--texto); }
+.banner-error-botones { display: flex; gap: 8px; flex-shrink: 0; }
+.banner-error-detalle {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #feb2b2;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.banner-error-detalle.oculto { display: none; }
+.banner-error-detalle h3 { margin: 0 0 6px; font-size: 14px; }
+.banner-error-detalle ol { margin: 0 0 8px; padding-left: 20px; }
+.banner-error-detalle code { background: #edf2f7; padding: 1px 5px; border-radius: 4px; }
+.banner-error-copiar { margin-top: 4px; }
+
+.log-clicable { cursor: pointer; }
+.log-clicable:hover { text-decoration: underline; }
+
 body {
   margin: 0;
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
