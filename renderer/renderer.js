@@ -739,6 +739,9 @@ function conectarEventos() {
   $('mensajePlantilla').value = config.mensaje;
   $('chkAutoEnvio').checked = !!config.autoEnvio;
   pintarTabla();
+  if (estadoInicial.version) {
+    $('versionTexto').textContent = 'v' + estadoInicial.version;
+  }
   setEstado(estadoInicial.estado);
   if (estadoInicial.ultimoError && estadoInicial.estado !== 'conectado') {
     log('Último error registrado: ' + estadoInicial.ultimoError, 'error');
@@ -749,6 +752,10 @@ function conectarEventos() {
   api.buscarActualizacion()
     .then((info) => {
       if (info.hayActualizacion) {
+        const v = $('versionTexto');
+        v.textContent = `v${info.local} → ${info.remota} disponible`;
+        v.classList.add('hay-nueva');
+        v.title = 'Hay una versión más nueva: pulsa «⟳ Actualizar» o reinicia la aplicación';
         log(`Hay una versión nueva (${info.remota}). Pulsa «⟳ Actualizar» o reinicia la aplicación.`, 'aviso');
       }
     })
