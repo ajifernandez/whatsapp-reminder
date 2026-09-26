@@ -405,7 +405,12 @@ function iniciarTemporizadorConectando() {
 
 function setEstado(estado) {
   $('estadoPunto').className = 'punto ' + estado;
-  const mapa = { conectado: 'Conectado', desconectado: 'Desconectado', conectando: 'Conectando...', error: 'Error' };
+  const mapa = {
+    conectado: 'Conectado',
+    desconectado: 'Desconectado — pulsa «Conectar WhatsApp»',
+    conectando: 'Conectando...',
+    error: 'Error — revisa el aviso de abajo',
+  };
 
   if (estado === 'conectando') {
     iniciarTemporizadorConectando();
