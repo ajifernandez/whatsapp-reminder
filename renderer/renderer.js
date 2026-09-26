@@ -378,10 +378,41 @@ $('btnBannerCerrar').addEventListener('click', () => {
 });
 
 // ---------- Estado de conexión ----------
+let temporizadorConectando = null;
+
+function detenerTemporizadorConectando() {
+  if (temporizadorConectando) {
+    clearInterval(temporizadorConectando);
+    temporizadorConectando = null;
+  }
+}
+
+// Mientras se conecta, avisa cuánto lleva esperando: arrancar el navegador
+// interno y restaurar la sesión puede tardar 30-40s la primera vez, y sin
+// esta cuenta atrás parece que la app se ha colgado.
+function iniciarTemporizadorConectando() {
+  detenerTemporizadorConectando();
+  const inicio = Date.now();
+  const actualizar = () => {
+    const s = Math.round((Date.now() - inicio) / 1000);
+    let texto = `Conectando... (${s}s)`;
+    if (s >= 8) texto += ' — puede tardar hasta 30-40s la primera vez';
+    $('estadoTexto').textContent = texto;
+  };
+  actualizar();
+  temporizadorConectando = setInterval(actualizar, 1000);
+}
+
 function setEstado(estado) {
   $('estadoPunto').className = 'punto ' + estado;
   const mapa = { conectado: 'Conectado', desconectado: 'Desconectado', conectando: 'Conectando...', error: 'Error' };
-  $('estadoTexto').textContent = mapa[estado] || estado;
+
+  if (estado === 'conectando') {
+    iniciarTemporizadorConectando();
+  } else {
+    detenerTemporizadorConectando();
+    $('estadoTexto').textContent = mapa[estado] || estado;
+  }
 
   conectado = estado === 'conectado';
   $('btnCerrar').disabled = !conectado;
@@ -430,6 +461,14 @@ $('btnEnviar').addEventListener('click', async () => {
   $('barraRelleno').style.width = '0%';
   $('progresoTexto').textContent = `0 / ${citas.length}`;
 
+  // estimación simple: ~3.7s de pausa media entre mensajes + 30s cada 20 (pausa larga)
+  const n = validas.length;
+  const segundosEstimados = Math.round(n * 3.7 + Math.floor(n / 20) * 30);
+  if (segundosEstimados >= 20) {
+    const minutos = Math.ceil(segundosEstimados / 60);
+    log(`Enviando ${n} recordatorio(s), con pausas de seguridad: puede tardar unos ${minutos} minuto(s).`, 'info');
+  }
+
   try {
     await guardarMensajeAhora();
     const r = await api.enviar(citas);
@@ -449,13 +488,13 @@ $('btnActualizar').addEventListener('click', async () => {
   const btn = $('btnActualizar');
   btn.disabled = true;
   try {
-    log('Comprobando actualizaciones...', 'info');
+    log('Comprobando actualizaciones... (unos segundos)', 'info');
     const info = await api.buscarActualizacion();
     if (!info.hayActualizacion) {
       log(`Ya tienes la última versión (${info.local}).`, 'ok');
       return;
     }
-    log(`Nueva versión ${info.remota} disponible. Descargando...`, 'info');
+    log(`Nueva versión ${info.remota} disponible. Descargando... puede tardar uno o dos minutos según tu conexión.`, 'info');
     const r = await api.actualizar();
     log(`Actualizado a la versión ${r.version}. Cierra y vuelve a abrir la aplicación para aplicar los cambios.`, 'ok');
   } catch (err) {
