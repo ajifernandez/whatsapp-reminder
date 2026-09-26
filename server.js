@@ -261,12 +261,16 @@ async function iniciarSesion() {
     emitir('estado', 'conectado');
     return;
   }
-  if (conectando) return; // ya hay un intento en curso
+  if (conectando) {
+    emitir('estado', 'conectando'); // confirma al navegador que sigue en curso, no se queda colgado
+    return;
+  }
 
   const ahora = Date.now();
   const restante = COOLDOWN_RECONEXION_MS - (ahora - ultimoIntentoConexion);
   if (restante > 0) {
     emitir('log', { tipo: 'aviso', texto: `Espera ${Math.ceil(restante / 1000)} s antes de reintentar conectar (evita bloqueos por reintentos seguidos).` });
+    emitir('estado', 'desconectado'); // deshace el "conectando" que puso el botón al pulsarlo
     return;
   }
 
@@ -548,6 +552,13 @@ const server = app.listen(PORT, () => {
   console.log('  Recordatorios WhatsApp Multiplataforma');
   console.log(`  Abre en tu navegador: http://localhost:${PORT}`);
   console.log('==================================================');
+
+  // Si ya había una sesión de WhatsApp vinculada antes, intenta reconectar
+  // sola al arrancar en vez de obligar a pulsar "Conectar" cada vez.
+  if (fs.existsSync(path.join(AUTH_PATH, 'session'))) {
+    registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
+    iniciarSesion();
+  }
 });
 
 // ---------- Cierre limpio al cerrar el terminal ----------
