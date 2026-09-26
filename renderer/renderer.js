@@ -30,7 +30,7 @@ const api = {
     if (!r.ok) throw new Error(data.error || 'Error al enviar');
     return data;
   }),
-  estado: () => fetch('/api/estado').then((r) => r.json()).then((d) => d.estado),
+  estado: () => fetch('/api/estado').then((r) => r.json()),
   buscarActualizacion: () => fetch('/api/actualizacion').then(async (r) => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'No se pudo comprobar');
@@ -574,7 +574,10 @@ function conectarEventos() {
   $('mensajePlantilla').value = config.mensaje;
   $('chkAutoEnvio').checked = !!config.autoEnvio;
   pintarTabla();
-  setEstado(estadoInicial);
+  setEstado(estadoInicial.estado);
+  if (estadoInicial.ultimoError) {
+    log('Último error registrado: ' + estadoInicial.ultimoError + ' (detalle en data/app.log)', 'error');
+  }
   conectarEventos();
 
   // Aviso no intrusivo si hay version nueva (el arranque ya intenta bajarla).

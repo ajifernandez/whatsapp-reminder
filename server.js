@@ -10,6 +10,8 @@ const CITAS_PATH = path.join(DATA_DIR, 'citas.json');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
 const CACHE_PATH = path.join(__dirname, '.wwebjs_cache');
+const LOG_PATH = path.join(DATA_DIR, 'app.log');
+const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -17,6 +19,37 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 let client = null;
 let clientReady = false;
 const sseClients = new Set(); // conexiones del navegador para eventos en vivo
+
+// ---------- Registro persistente ----------
+// Los mensajes del panel "Registro" se escriben también en data/app.log y en
+// la consola, para poder consultar el motivo de un fallo después de cerrar.
+function leerUltimoErrorDelLog() {
+  try {
+    if (!fs.existsSync(LOG_PATH)) return null;
+    const lineas = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n');
+    for (let i = lineas.length - 1; i >= 0; i--) {
+      if (lineas[i].includes('[error]')) {
+        return lineas[i].replace(/^\[[^\]]*\]\s*\[error\]\s*/, '');
+      }
+    }
+  } catch (_) { /* ignorar */ }
+  return null;
+}
+
+let ultimoError = leerUltimoErrorDelLog(); // sobrevive recargas del navegador y reinicios
+
+function registrarLog(tipo, texto) {
+  if (tipo === 'error') ultimoError = texto;
+  const linea = `[${new Date().toISOString()}] [${tipo}] ${texto}`;
+  try {
+    if (fs.existsSync(LOG_PATH) && fs.statSync(LOG_PATH).size > LOG_MAX_BYTES) {
+      const viejo = fs.readFileSync(LOG_PATH, 'utf8');
+      fs.writeFileSync(LOG_PATH, viejo.slice(-Math.floor(LOG_MAX_BYTES / 2)), 'utf8');
+    }
+    fs.appendFileSync(LOG_PATH, linea + '\n', 'utf8');
+  } catch (_) { /* si no se puede escribir, al menos llega por SSE */ }
+  console.log(linea);
+}
 
 // ---------- Datos ----------
 function seedCitasSiHaceFalta() {
@@ -78,6 +111,9 @@ function guardarConfig(config) {
 
 // ---------- Eventos hacia el navegador (SSE) ----------
 function emitir(evento, datos) {
+  if (evento === 'log' && datos && typeof datos === 'object') {
+    registrarLog(datos.tipo || 'info', String(datos.texto ?? ''));
+  }
   const linea = `event: ${evento}\ndata: ${JSON.stringify(datos)}\n\n`;
   for (const res of sseClients) {
     try { res.write(linea); } catch (_) { /* ignorar */ }
@@ -197,6 +233,7 @@ function crearClienteSiHaceFalta() {
 
   client.on('ready', () => {
     clientReady = true;
+    ultimoError = null; // la conexión funcionó: el error anterior ya no aplica
     emitir('estado', 'conectado');
     emitir('log', { tipo: 'ok', texto: 'WhatsApp conectado y listo.' });
   });
@@ -428,7 +465,7 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: clientReady ? 'conectado' : 'desconectado' }));
+app.get('/api/estado', (_req, res) => res.json({ estado: clientReady ? 'conectado' : 'desconectado', ultimoError }));
 
 app.post('/api/conectar', (_req, res) => { iniciarSesion(); res.json({ ok: true }); });
 
@@ -467,6 +504,15 @@ app.post('/api/actualizar', async (_req, res) => {
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+});
+
+// Errores internos de puppeteer/whatsapp-web.js que no pasan por emitir():
+// se guardan en el log para no perder el motivo real de un fallo de conexión.
+process.on('unhandledRejection', (err) => {
+  registrarLog('error', 'Error interno no capturado: ' + (err && err.message ? err.message : String(err)));
+});
+process.on('uncaughtException', (err) => {
+  registrarLog('error', 'Excepción no capturada: ' + err.message);
 });
 
 const server = app.listen(PORT, () => {
