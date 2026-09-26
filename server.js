@@ -233,6 +233,7 @@ function crearClienteSiHaceFalta() {
 
   client.on('ready', () => {
     pararTemporizadorConexion();
+    conectando = false;
     clientReady = true;
     ultimoError = null; // la conexión funcionó: el error anterior ya no aplica
     emitir('estado', 'conectado');
@@ -241,6 +242,7 @@ function crearClienteSiHaceFalta() {
 
   client.on('auth_failure', (msg) => {
     pararTemporizadorConexion();
+    conectando = false;
     clientReady = false;
     emitir('estado', 'error');
     emitir('log', { tipo: 'error', texto: 'Error de autenticación: ' + msg });
@@ -248,6 +250,7 @@ function crearClienteSiHaceFalta() {
 
   client.on('disconnected', (reason) => {
     pararTemporizadorConexion();
+    conectando = false;
     clientReady = false;
     emitir('estado', 'desconectado');
     emitir('log', { tipo: 'error', texto: 'Sesión desconectada: ' + reason });
@@ -256,7 +259,7 @@ function crearClienteSiHaceFalta() {
 }
 
 const COOLDOWN_RECONEXION_MS = 30 * 1000; // evita reintentos en bucle (posible causa de bloqueo)
-const TIMEOUT_CONEXION_MS = 60 * 1000; // si no conecta en este tiempo, se cancela en vez de colgarse para siempre
+const TIMEOUT_CONEXION_MS = 90 * 1000; // si no conecta en este tiempo, se cancela en vez de colgarse para siempre
 let ultimoIntentoConexion = 0;
 let conectando = false;
 let temporizadorConexion = null;
@@ -266,6 +269,15 @@ function pararTemporizadorConexion() {
     clearTimeout(temporizadorConexion);
     temporizadorConexion = null;
   }
+}
+
+// Estado para informar al navegador: incluye 'conectando' mientras hay un
+// intento en marcha, aunque clientReady siga en false (evita que la página
+// recién cargada muestre "Desconectado" y habilite el botón durante el intento)
+function estadoActual() {
+  if (clientReady) return 'conectado';
+  if (conectando) return 'conectando';
+  return 'desconectado';
 }
 
 async function iniciarSesion() {
@@ -301,13 +313,24 @@ async function iniciarSesion() {
     const clienteColgado = client;
     client = null;
     conectando = false;
-    if (clienteColgado) clienteColgado.destroy().catch(() => {});
+    // destroy() puede emitir 'disconnected' y machacar el estado 'error' que
+    // acabamos de poner: se quita el listener antes de destruirlo
+    if (clienteColgado) {
+      clienteColgado.removeAllListeners('disconnected');
+      clienteColgado.destroy().catch(() => {});
+    }
   }, TIMEOUT_CONEXION_MS);
 
+  // NOTA: conectando se libera solo en estados finales (ready, auth_failure,
+  // disconnected, error de initialize o timeout). initialize() resuelve ANTES
+  // de que llegue 'ready': si se liberara aquí, un clic en "Conectar" durante
+  // ese hueco caería en el cooldown y pondría estado 'desconectado' aunque la
+  // conexión siguiera en marcha.
   client.initialize().catch((err) => {
+    conectando = false;
     emitir('estado', 'error');
     emitir('log', { tipo: 'error', texto: 'Error al iniciar: ' + err.message });
-  }).finally(() => { conectando = false; });
+  });
 }
 
 async function cerrarSesion() {
@@ -505,7 +528,7 @@ app.get('/api/events', (req, res) => {
   res.write('retry: 3000\n\n');
   sseClients.add(res);
   // estado actual al conectar
-  res.write(`event: estado\ndata: ${JSON.stringify(clientReady ? 'conectado' : 'desconectado')}\n\n`);
+  res.write(`event: estado\ndata: ${JSON.stringify(estadoActual())}\n\n`);
   req.on('close', () => sseClients.delete(res));
 });
 
@@ -523,7 +546,7 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: clientReady ? 'conectado' : 'desconectado', ultimoError }));
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError }));
 
 app.post('/api/conectar', (_req, res) => { iniciarSesion(); res.json({ ok: true }); });
 
