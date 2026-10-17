@@ -1,6 +1,6 @@
 // Receptor de diagnosticos de las clinicas. Sin dependencias (Node 18+).
 // POST /diagnostico  (JSON)  -> guarda DATA_DIR/<fecha>_<host>.json y avisa a NTFY_URL si existe.
-// GET  /             -> listado web (ver / descargar). Requiere ADMIN_PASS (Basic auth); sin ella queda desactivado.
+// GET  /             -> listado web (ver / descargar / borrar). Requiere ADMIN_PASS (Basic auth); sin ella queda desactivado.
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -53,20 +53,32 @@ function autorizar(req, res) {
 }
 
 function paginaListado() {
-  const filas = fs.readdirSync(DATA_DIR).filter((n) => /^[\w.-]+\.json$/.test(n)).sort().reverse().slice(0, 200).map((n) => {
+  const todos = fs.readdirSync(DATA_DIR).filter((n) => /^[\w.-]+\.json$/.test(n));
+  const kb = Math.round(todos.reduce((t, n) => t + fs.statSync(path.join(DATA_DIR, n)).size, 0) / 1024);
+  const filas = todos.sort().reverse().slice(0, 200).map((n) => {
     let d = {};
     try { d = JSON.parse(fs.readFileSync(path.join(DATA_DIR, n), 'utf8')); } catch (_) { /* fichero ilegible */ }
     const fecha = fs.statSync(path.join(DATA_DIR, n)).mtime.toLocaleString('es-ES', { timeZone: ZONA });
     const u = encodeURIComponent(n);
     return `<tr><td>${esc(d.host)}<br><small>${esc(d._ip)}</small></td><td>${esc(fecha)}</td><td>${esc(d.version)}</td>`
       + `<td>${esc(d.estado)}${d.ultimoError ? `<br><small>${esc(String(d.ultimoError).slice(0, 80))}</small>` : ''}</td>`
-      + `<td><a href="/f/${u}">ver</a> · <a href="/f/${u}?d=1">descargar</a></td></tr>`;
+      + `<td><a href="/f/${u}">ver</a> · <a href="/f/${u}?d=1">descargar</a> · <a href="#" data-borrar="${esc(n)}">borrar</a></td></tr>`;
   });
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Diagnósticos</title>
 <style>body{font:14px system-ui;margin:16px;max-width:900px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #ddd;vertical-align:top}small{color:#666}</style>
-<h1>Diagnósticos recibidos (${filas.length})</h1>
-<table><tr><th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th></th></tr>${filas.join('') || '<tr><td colspan=5>Sin informes todavía</td></tr>'}</table>`;
+<h1>Diagnósticos recibidos (${todos.length}, ${kb} KB)</h1>
+<table><tr><th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th></th></tr>${filas.join('') || '<tr><td colspan=5>Sin informes todavía</td></tr>'}</table>
+<script>
+document.addEventListener('click', async (e) => {
+  const n = e.target.dataset && e.target.dataset.borrar;
+  if (!n) return;
+  e.preventDefault();
+  if (!confirm('¿Borrar ' + n + '? No se puede deshacer.')) return;
+  const r = await fetch('/f/' + encodeURIComponent(n), { method: 'DELETE' });
+  if (r.ok) location.reload(); else alert('No se pudo borrar (' + r.status + ')');
+});
+</script>`;
 }
 
 function podar() {
@@ -93,6 +105,18 @@ http.createServer((req, res) => {
     if (url.searchParams.has('d')) cab['Content-Disposition'] = `attachment; filename="${path.basename(ruta)}"`;
     res.writeHead(200, cab);
     return res.end(fs.readFileSync(ruta));
+  }
+  const d = req.method === 'DELETE' && url.pathname.match(/^\/f\/([\w.-]+\.json)$/);
+  if (d) {
+    // DELETE cross-origin ya exige preflight (que no respondemos); el Origin se comprueba ademas por si acaso
+    const origen = req.headers.origin;
+    if (origen && (() => { try { return new URL(origen).host !== req.headers.host; } catch { return true; } })()) return responder(res, 403, 'origen no permitido');
+    if (!autorizar(req, res)) return;
+    const ruta = path.join(DATA_DIR, path.basename(d[1]));
+    if (!fs.existsSync(ruta)) return responder(res, 404, 'no');
+    fs.rmSync(ruta);
+    console.log('borrado', path.basename(ruta));
+    return responder(res, 200, 'ok');
   }
   if (req.method !== 'POST' || url.pathname !== '/diagnostico') return responder(res, 404, 'no');
 
