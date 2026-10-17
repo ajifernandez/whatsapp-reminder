@@ -1,15 +1,21 @@
-# Stack para Dockge. Los informes quedan en ./data (o un dataset de TrueNAS).
-# Exponerlo con tu proxy inverso / tunel (HTTPS) hacia el puerto 3000 de este contenedor.
+# Pegar en Dockge (nuevo stack "soporte"). No hace falta copiar ficheros ni construir:
+# al arrancar descarga server.js desde GitHub (rama main).
+# Despues, publicarlo con HTTPS (Nginx Proxy Manager) hacia el puerto 3100 de este host.
 services:
   soporte:
-    build: .
+    image: node:22-alpine
     restart: unless-stopped
+    working_dir: /app
+    command: sh -c "wget -qO server.js https://raw.githubusercontent.com/ajifernandez/whatsapp-reminder/main/soporte-server/server.js && exec node server.js"
     ports:
       - "3100:3000"
     environment:
-      # NTFY_URL: https://ntfy.tudominio/diagnosticos   # opcional: aviso push
       DATA_DIR: /data
       ADMIN_USER: admin
       ADMIN_PASS: cambia-esto   # contraseña de la interfaz web (GET /); sin ella queda desactivada
+      # NTFY_URL: https://ntfy.tudominio/diagnosticos   # opcional: aviso push
     volumes:
-      - ./data:/data
+      - soporte-data:/data
+
+volumes:
+  soporte-data:
