@@ -85,3 +85,17 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
 - No es la API oficial de Meta: pensado para recordatorios personales o de consultas pequeñas, no para envíos masivos ni spam.
 - Requiere que el móvil vinculado tenga conexión a internet.
+
+## Diagnóstico de problemas de conexión
+
+Con la app abierta, visitar `http://localhost:PUERTO/api/diagnostico` (mismo puerto que la app). Devuelve versión, estado, último error, SO/Node, RAM libre, si hay sesión vinculada, locks de Chromium y las últimas 80 líneas del log. Pedir a la clínica que copie ese texto.
+
+Qué mirar:
+
+- `lockYaExistiaAlArrancar` no vacío: el equipo se apagó sin cerrar la app (apagón, kill, cierre forzado). La app ya lo limpia sola; solo indica que hubo cierre sucio.
+- Log con `Cargando WhatsApp Web: N%` que se queda parado: Chromium arranca pero WhatsApp Web no termina de cargar (red, proxy, antivirus). Si ni aparece, Chromium no arranca (ruta, permisos, RAM).
+- `ramLibreMB` bajo (<500): Chromium se arrastra o muere.
+- `Error de autenticación` / `Sesión desconectada`: el teléfono desvinculó la sesión; hay que volver a escanear el QR.
+- `La conexión tardó más de 90s`: ver las líneas anteriores del log para saber en qué fase se quedó.
+
+El log completo está en `data/app.log` (se recorta solo a 512 KB). Borrar `.wwebjs_auth` es el último recurso: pierde la sesión y obliga a volver a vincular.
