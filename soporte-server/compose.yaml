@@ -9,5 +9,7 @@ services:
     environment:
       # NTFY_URL: https://ntfy.tudominio/diagnosticos   # opcional: aviso push
       DATA_DIR: /data
+      ADMIN_USER: admin
+      ADMIN_PASS: cambia-esto   # contraseña de la interfaz web (GET /); sin ella queda desactivada
     volumes:
       - ./data:/data
