@@ -34,7 +34,8 @@ const iguales = (a, b) => {
   return crypto.timingSafeEqual(x, y);
 };
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const ipDe = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim();
+// Detras de Cloudflare la IP real va en CF-Connecting-IP (no falsificable); X-Forwarded-For lo controla el cliente.
+const ipDe = (req) => String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim();
 
 // Devuelve true si la peticion esta autorizada; si no, ya ha respondido.
 function autorizar(req, res) {
