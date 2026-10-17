@@ -86,6 +86,10 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 - No es la API oficial de Meta: pensado para recordatorios personales o de consultas pequeñas, no para envíos masivos ni spam.
 - Requiere que el móvil vinculado tenga conexión a internet.
 
+## Volver a una versión anterior (downgrade)
+
+Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `vX.Y.Z` de GitHub) y crea `data/version-fija.txt`, que desactiva el auto-update. Para volver a seguir la última: `node update.js latest`. Solo se queda fijada si la versión destino es 2.1.11 o posterior (las anteriores no conocen la fijación y se actualizarían solas). Al publicar una versión nueva: `git tag vX.Y.Z && git push --tags`.
+
 ## Diagnóstico de problemas de conexión
 
 Con la app abierta, visitar `http://localhost:PUERTO/api/diagnostico` (mismo puerto que la app). Devuelve versión, estado, último error, SO/Node, RAM libre, si hay sesión vinculada, locks de Chromium y las últimas 80 líneas del log. Pedir a la clínica que copie ese texto.
