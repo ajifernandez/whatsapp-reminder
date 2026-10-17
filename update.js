@@ -10,6 +10,8 @@
 // entero se escribe a disco. Asi un corte a mitad no deja ficheros corruptos.
 //
 // Uso directo:  node update.js            -> comprueba y aplica
+//               node update.js 2.1.9      -> downgrade: instala esa version y desactiva el auto-update
+//               node update.js latest     -> quita la fijacion y actualiza
 // Como modulo:  require('./update.js')    -> buscarActualizacion / aplicarActualizacion
 
 const fs = require('fs');
@@ -18,7 +20,10 @@ const https = require('https');
 
 const REPO = 'ajifernandez/whatsapp-reminder';
 const RAMA = 'main';
-const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${RAMA}`;
+const rawBase = (ref) => `https://raw.githubusercontent.com/${REPO}/${ref}`;
+// Si existe, el auto-update queda desactivado y la app se queda en esa version
+// (downgrade). 'node update.js latest' lo borra.
+const FIJA = path.join(__dirname, 'data', 'version-fija.txt');
 
 // Ficheros que se actualizan. NO incluir node_modules/, chrome/, bin/, data/
 // ni .wwebjs_* (binarios pesados, datos locales o sesion).
@@ -78,17 +83,18 @@ function esMayor(a, b) {
 
 async function buscarActualizacion() {
   const local = versionLocal();
-  const remotaPkg = JSON.parse(await descargar(RAW_BASE + '/package.json'));
+  if (fs.existsSync(FIJA)) return { local, remota: local, hayActualizacion: false, fijada: true };
+  const remotaPkg = JSON.parse(await descargar(rawBase(RAMA) + '/package.json'));
   const remota = remotaPkg.version || '0.0.0';
   return { local, remota, hayActualizacion: esMayor(remota, local) };
 }
 
 // Baja todos los ficheros a memoria y, si van todos, los escribe. Devuelve
 // la lista de ficheros actualizados.
-async function aplicarActualizacion() {
+async function aplicarActualizacion(ref = RAMA) {
   const contenidos = {};
   for (const rel of ARCHIVOS) {
-    contenidos[rel] = await descargar(RAW_BASE + '/' + rel);
+    contenidos[rel] = await descargar(rawBase(ref) + '/' + rel);
   }
   const escritos = [];
   for (const rel of ARCHIVOS) {
@@ -107,7 +113,17 @@ module.exports = { buscarActualizacion, aplicarActualizacion, versionLocal, ARCH
 if (require.main === module) {
   (async () => {
     try {
-      const { local, remota, hayActualizacion } = await buscarActualizacion();
+      const arg = process.argv[2];
+      if (arg && arg !== 'latest') {
+        if (!/^\d+\.\d+\.\d+$/.test(arg)) return console.log('[update] Version invalida. Uso: node update.js 2.1.9 | latest');
+        const escritos = await aplicarActualizacion('v' + arg);
+        fs.mkdirSync(path.dirname(FIJA), { recursive: true });
+        fs.writeFileSync(FIJA, arg);
+        return console.log(`[update] Version fijada a ${arg} (auto-update desactivado). Ficheros: ${escritos.join(', ')}. Para volver: node update.js latest`);
+      }
+      if (arg === 'latest') fs.rmSync(FIJA, { force: true });
+      const { local, remota, hayActualizacion, fijada } = await buscarActualizacion();
+      if (fijada) return console.log(`[update] Version fijada en ${local}: no se actualiza. Para volver: node update.js latest`);
       if (!hayActualizacion) {
         console.log(`[update] Ya estas en la ultima version (${local}).`);
         return;
