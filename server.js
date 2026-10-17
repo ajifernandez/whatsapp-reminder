@@ -578,20 +578,40 @@ function anonimizar(linea) {
     .replace(/\+?\d[\d\s-]{6,}\d/g, '[tel]');
 }
 
-// Resumen para soporte remoto: abrir http://localhost:PUERTO/api/diagnostico
-app.get('/api/diagnostico', (_req, res) => {
+// Receptor de diagnosticos (ver soporte-server/). Vacio = sin envio directo: la UI cae a descarga + correo.
+const DIAG_URL = process.env.DIAG_URL || '';
+
+function informeDiagnostico() {
   const os = require('os');
   const sesion = path.join(AUTH_PATH, 'session');
   const locks = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].filter((f) => fs.lstatSync(path.join(sesion, f), { throwIfNoEntry: false }));
   let log = [];
   try { log = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n').slice(-80); } catch (_) { /* sin log */ }
-  res.json({
+  return {
     version: updater.versionLocal(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
     sesionVinculada: fs.existsSync(sesion), locksChromium: locks,
     lockYaExistiaAlArrancar: locksAlArrancar, citas: leerCitas().length, log: log.map(anonimizar)
-  });
+  };
+}
+
+// Resumen para soporte remoto: abrir http://localhost:PUERTO/api/diagnostico
+app.get('/api/diagnostico', (_req, res) => res.json(informeDiagnostico()));
+
+app.post('/api/enviar-diagnostico', async (_req, res) => {
+  if (!DIAG_URL) return res.status(501).json({ error: 'Envio directo no configurado' });
+  try {
+    const r = await fetch(DIAG_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(informeDiagnostico()), signal: AbortSignal.timeout(15000)
+    });
+    if (!r.ok) throw new Error('El servidor respondio ' + r.status);
+    registrarLog('info', 'Diagnostico enviado a soporte');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 app.post('/api/conectar', (_req, res) => { iniciarSesion(); res.json({ ok: true }); });

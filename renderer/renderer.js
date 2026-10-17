@@ -538,12 +538,19 @@ async function cargarVersiones() {
   } catch (_) { /* sin conexion: ignorar */ }
 }
 
-// Soporte remoto. Un mailto: no puede adjuntar ficheros: se descarga el informe
-// y se abre el correo para que lo adjunten.
+// Soporte remoto: el servidor envia el informe a soporte. Si no hay envio directo
+// o falla (p. ej. sin internet), se descarga el informe y se abre el correo para adjuntarlo.
 const EMAIL_SOPORTE = 'agustinjf87@gmail.com';
 $('btnDiagnostico').addEventListener('click', async () => {
+  const btn = $('btnDiagnostico');
+  btn.disabled = true;
   try {
-    const d = await fetch('/api/diagnostico').then((r) => r.json());
+    const r = await fetch('/api/enviar-diagnostico', { method: 'POST' });
+    if (r.ok) return log('Diagnóstico enviado a soporte. Gracias.', 'ok');
+    const motivo = (await r.json().catch(() => ({}))).error;
+    if (r.status !== 501) log('No se pudo enviar directamente (' + motivo + '). Se usa el correo.', 'aviso');
+
+    const d = await fetch('/api/diagnostico').then((x) => x.json());
     const nombre = `diagnostico-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }));
@@ -556,6 +563,8 @@ $('btnDiagnostico').addEventListener('click', async () => {
     location.href = `mailto:${EMAIL_SOPORTE}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
   } catch (err) {
     log('No se pudo generar el diagnóstico: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 });
 
