@@ -578,8 +578,8 @@ function anonimizar(linea) {
     .replace(/\+?\d[\d\s-]{6,}\d/g, '[tel]');
 }
 
-// Receptor de diagnosticos (ver soporte-server/). Vacio = sin envio directo: la UI cae a descarga + correo.
-const DIAG_URL = process.env.DIAG_URL || '';
+// Receptor de diagnosticos (ver soporte-server/). Si falla o esta vacio, la UI cae a descarga + correo.
+const DIAG_URL = process.env.DIAG_URL || 'https://soporte.familia-jimenez.es/diagnostico';
 
 function informeDiagnostico() {
   const os = require('os');
