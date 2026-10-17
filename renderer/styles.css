@@ -285,3 +285,10 @@ td input:focus { border-color: var(--azul); background: #fff; outline: none; }
 .estado-envio { text-align: center; font-size: 16px; font-weight: bold; }
 .estado-envio.ok { color: #1e9e5a; }
 .estado-envio.error { color: #d93025; }
+
+/* Avisos efímeros (toasts) */
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
+.toast { background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,.25); max-width: 340px; border-left: 4px solid var(--azul); }
+.toast.ok { border-left-color: #1e9e5a; }
+.toast.aviso { border-left-color: #d97706; }
+.toast.error { border-left-color: #d93025; }

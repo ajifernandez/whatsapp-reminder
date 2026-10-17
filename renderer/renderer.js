@@ -261,6 +261,15 @@ function actualizarBotonEnviar() {
 }
 
 // ---------- Registro ----------
+// Aviso efímero en pantalla (el log solo queda abajo, fuera de la vista).
+function toast(texto, tipo = 'info') {
+  const t = document.createElement('div');
+  t.className = `toast ${tipo}`;
+  t.textContent = texto;
+  $('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 5000);
+}
+
 function log(texto, tipo = 'info') {
   const li = document.createElement('li');
   li.className = tipo;
@@ -502,21 +511,18 @@ $('btnEnviar').addEventListener('click', async () => {
 
 $('btnLimpiarLog').addEventListener('click', () => { $('log').innerHTML = ''; });
 
+// El servidor deja el resultado en el log (pagina y app.log); aqui solo se avisa con un toast.
 $('btnActualizar').addEventListener('click', async () => {
   const btn = $('btnActualizar');
   btn.disabled = true;
   try {
-    log('Comprobando actualizaciones... (unos segundos)', 'info');
-    const info = await api.buscarActualizacion();
-    if (!info.hayActualizacion) {
-      log(`Ya tienes la última versión (${info.local}).`, 'ok');
-      return;
-    }
-    log(`Nueva versión ${info.remota} disponible. Descargando... puede tardar uno o dos minutos según tu conexión.`, 'info');
+    toast('Comprobando actualizaciones...');
     const r = await api.actualizar();
-    log(`Actualizado a la versión ${r.version}. Cierra y vuelve a abrir la aplicación para aplicar los cambios.`, 'ok');
+    if (r.actualizado) toast(`Actualizado a la versión ${r.version}. Cierra y vuelve a abrir la aplicación.`, 'ok');
+    else if (r.fijada) toast(`Versión fijada en ${r.version}: no se actualiza sola.`, 'aviso');
+    else toast(`Ya tienes la última versión (${r.version}).`, 'ok');
   } catch (err) {
-    log('No se pudo actualizar: ' + err.message, 'error');
+    toast('No se pudo actualizar: ' + err.message, 'error');
   } finally {
     btn.disabled = false;
   }
@@ -546,7 +552,7 @@ $('btnDiagnostico').addEventListener('click', async () => {
   btn.disabled = true;
   try {
     const r = await fetch('/api/enviar-diagnostico', { method: 'POST' });
-    if (r.ok) return log('Diagnóstico enviado a soporte. Gracias.', 'ok');
+    if (r.ok) return toast('Diagnóstico enviado a soporte. Gracias.', 'ok');
     const motivo = (await r.json().catch(() => ({}))).error;
     if (r.status !== 501) log('No se pudo enviar directamente (' + motivo + '). Se usa el correo.', 'aviso');
 
@@ -576,9 +582,9 @@ $('selVersion').addEventListener('change', async () => {
   if (!confirm(`¿Instalar ${txt}?`)) { sel.value = ''; return; }
   sel.disabled = true;
   try {
-    log(`Instalando ${v === 'latest' ? 'la última versión' : 'la versión ' + v}... puede tardar un minuto.`, 'info');
+    toast(`Instalando ${v === 'latest' ? 'la última versión' : 'la versión ' + v}... puede tardar un minuto.`);
     await api.cambiarVersion(v);
-    log('Hecho. Cierra y vuelve a abrir la aplicación para aplicar los cambios.', 'ok');
+    toast('Hecho. Cierra y vuelve a abrir la aplicación para aplicar los cambios.', 'ok');
   } catch (err) {
     log('No se pudo cambiar de versión: ' + err.message, 'error');
   } finally {

@@ -607,7 +607,7 @@ app.post('/api/enviar-diagnostico', async (_req, res) => {
       body: JSON.stringify(informeDiagnostico()), signal: AbortSignal.timeout(15000)
     });
     if (!r.ok) throw new Error('El servidor respondio ' + r.status);
-    registrarLog('info', 'Diagnostico enviado a soporte');
+    emitir('log', { tipo: 'ok', texto: 'Diagnostico enviado a soporte' });
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: err.message });
@@ -657,7 +657,7 @@ app.post('/api/version', async (req, res) => {
     } else {
       await updater.fijarVersion(v);
     }
-    registrarLog('aviso', `Cambio de version: ${v}`);
+    emitir('log', { tipo: 'aviso', texto: `Cambio de version: ${v}. Reinicia la aplicacion para aplicar los cambios.` });
     res.json({ version: v });
   } catch (err) {
     res.status(502).json({ error: err.message });
@@ -669,12 +669,21 @@ app.post('/api/version', async (req, res) => {
 // se ven al recargar el navegador.
 app.post('/api/actualizar', async (_req, res) => {
   try {
-    const { hayActualizacion, remota } = await updater.buscarActualizacion();
-    if (!hayActualizacion) return res.json({ actualizado: false, version: remota });
+    const { local, remota, hayActualizacion, fijada } = await updater.buscarActualizacion();
+    if (fijada) {
+      emitir('log', { tipo: 'aviso', texto: `Versión fijada en ${local}: no se actualiza sola. Elige «Última (automática)» en el selector de versión para volver.` });
+      return res.json({ actualizado: false, version: local, fijada: true });
+    }
+    if (!hayActualizacion) {
+      emitir('log', { tipo: 'ok', texto: `Ya tienes la última versión (${local}).` });
+      return res.json({ actualizado: false, version: local });
+    }
+    emitir('log', { tipo: 'info', texto: `Nueva versión ${remota} disponible (tienes ${local}). Descargando...` });
     const archivos = await updater.aplicarActualizacion();
     emitir('log', { tipo: 'ok', texto: `Actualizado a la version ${remota}. Reinicia la aplicacion para aplicar los cambios.` });
     res.json({ actualizado: true, version: remota, archivos });
   } catch (err) {
+    emitir('log', { tipo: 'error', texto: 'No se pudo actualizar: ' + err.message });
     res.status(502).json({ error: err.message });
   }
 });
