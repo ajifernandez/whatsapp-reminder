@@ -200,10 +200,29 @@ function limpiarCacheWeb() {
   }
 }
 
+// Tras apagar el PC / kill -9, Chromium deja SingletonLock/Cookie/Socket en el
+// perfil y el siguiente arranque se cuelga creyendo que otra instancia lo usa.
+// Aquí solo corre un Chromium (el nuestro, aún sin crear), así que son seguros de borrar.
+let locksAlArrancar = [];
+function limpiarLocksChromium() {
+  const dir = path.join(AUTH_PATH, 'session');
+  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort']) {
+    try {
+      const ruta = path.join(dir, f);
+      if (fs.existsSync(ruta) || fs.lstatSync(ruta, { throwIfNoEntry: false })) {
+        registrarLog('aviso', `Lock huérfano de Chromium eliminado: ${f}`);
+        locksAlArrancar.push(f);
+      }
+      fs.rmSync(ruta, { force: true });
+    } catch (_) { /* ignorar */ }
+  }
+}
+
 function crearClienteSiHaceFalta() {
   if (client) return;
 
   limpiarCacheWeb();
+  limpiarLocksChromium();
 
   client = new Client({
     authStrategy: new LocalAuth({ dataPath: path.resolve(AUTH_PATH) }),
@@ -228,6 +247,8 @@ function crearClienteSiHaceFalta() {
       emitir('log', { tipo: 'error', texto: 'No se pudo generar el QR: ' + err.message });
     }
   });
+
+  client.on('loading_screen', (pct, msg) => registrarLog('info', `Cargando WhatsApp Web: ${pct}% ${msg || ''}`));
 
   client.on('authenticated', () => emitir('log', { tipo: 'info', texto: 'Autenticado, conectando...' }));
 
@@ -547,6 +568,22 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
 app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal() }));
+
+// Resumen para soporte remoto: abrir http://localhost:PUERTO/api/diagnostico
+app.get('/api/diagnostico', (_req, res) => {
+  const os = require('os');
+  const sesion = path.join(AUTH_PATH, 'session');
+  const locks = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].filter((f) => fs.lstatSync(path.join(sesion, f), { throwIfNoEntry: false }));
+  let log = [];
+  try { log = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n').slice(-80); } catch (_) { /* sin log */ }
+  res.json({
+    version: updater.versionLocal(), estado: estadoActual(), ultimoError,
+    node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
+    arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
+    sesionVinculada: fs.existsSync(sesion), locksChromium: locks,
+    lockYaExistiaAlArrancar: locksAlArrancar, citas: leerCitas().length, log
+  });
+});
 
 app.post('/api/conectar', (_req, res) => { iniciarSesion(); res.json({ ok: true }); });
 
