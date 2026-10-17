@@ -92,7 +92,7 @@ Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `
 
 ## Diagnóstico de problemas de conexión
 
-Con la app abierta, visitar `http://localhost:PUERTO/api/diagnostico` (mismo puerto que la app). Devuelve versión, estado, último error, SO/Node, RAM libre, si hay sesión vinculada, locks de Chromium y las últimas 80 líneas del log. Pedir a la clínica que copie ese texto.
+Con la app abierta, visitar `http://localhost:PUERTO/api/diagnostico` (mismo puerto que la app). Devuelve versión, estado, último error, SO/Node, RAM libre, si hay sesión vinculada, locks de Chromium y las últimas 80 líneas del log. El botón «✉ Enviar diagnóstico» de la cabecera descarga ese informe como `.json` y abre el correo hacia el soporte (hay que adjuntar el fichero a mano). El log se anonimiza antes: nombres y teléfonos de pacientes salen como `[nombre]` y `[tel]` (función `anonimizar` en `server.js`; si se añaden logs con datos personales, revisarla).
 
 Qué mirar:
 

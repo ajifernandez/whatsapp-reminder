@@ -569,6 +569,15 @@ app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
 app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada() }));
 
+// El log lleva nombres y telefonos de pacientes: se quitan antes de sacarlo del equipo.
+function anonimizar(linea) {
+  const [, prefijo = '', texto] = String(linea).match(/^(\[[^\]]*\] \[[^\]]*\] )?([\s\S]*)$/);
+  return prefijo + texto
+    .replace(/(Enviado a|Error con|omitida:) [^(\n]+?(?= \(|$)/g, '$1 [nombre]')
+    .replace(/^[^(\n]+(?= \([^)]*\): el número no es válido)/, '[nombre]')
+    .replace(/\+?\d[\d\s-]{6,}\d/g, '[tel]');
+}
+
 // Resumen para soporte remoto: abrir http://localhost:PUERTO/api/diagnostico
 app.get('/api/diagnostico', (_req, res) => {
   const os = require('os');
@@ -577,11 +586,11 @@ app.get('/api/diagnostico', (_req, res) => {
   let log = [];
   try { log = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n').slice(-80); } catch (_) { /* sin log */ }
   res.json({
-    version: updater.versionLocal(), estado: estadoActual(), ultimoError,
+    version: updater.versionLocal(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
     sesionVinculada: fs.existsSync(sesion), locksChromium: locks,
-    lockYaExistiaAlArrancar: locksAlArrancar, citas: leerCitas().length, log
+    lockYaExistiaAlArrancar: locksAlArrancar, citas: leerCitas().length, log: log.map(anonimizar)
   });
 });
 

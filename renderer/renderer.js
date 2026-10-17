@@ -538,6 +538,27 @@ async function cargarVersiones() {
   } catch (_) { /* sin conexion: ignorar */ }
 }
 
+// Soporte remoto. Un mailto: no puede adjuntar ficheros: se descarga el informe
+// y se abre el correo para que lo adjunten.
+const EMAIL_SOPORTE = 'agustinjf87@gmail.com';
+$('btnDiagnostico').addEventListener('click', async () => {
+  try {
+    const d = await fetch('/api/diagnostico').then((r) => r.json());
+    const nombre = `diagnostico-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }));
+    a.download = nombre;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    const asunto = `Diagnóstico Recordatorios WhatsApp v${d.version}`;
+    const cuerpo = `Hola,\n\nAdjunto el fichero ${nombre} (está en la carpeta de Descargas).\n\nEstado: ${d.estado}\n`;
+    log(`Informe descargado (${nombre}). Se abre el correo: adjunta ese fichero y envíalo.`, 'info');
+    location.href = `mailto:${EMAIL_SOPORTE}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  } catch (err) {
+    log('No se pudo generar el diagnóstico: ' + err.message, 'error');
+  }
+});
+
 $('selVersion').addEventListener('change', async () => {
   const sel = $('selVersion');
   const v = sel.value;
