@@ -1,0 +1,13 @@
+# Stack para Dockge. Los informes quedan en ./data (o un dataset de TrueNAS).
+# Exponerlo con tu proxy inverso / tunel (HTTPS) hacia el puerto 3000 de este contenedor.
+services:
+  soporte:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    environment:
+      # NTFY_URL: https://ntfy.tudominio/diagnosticos   # opcional: aviso push
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
