@@ -88,7 +88,7 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
 ## Volver a una versión anterior (downgrade)
 
-Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `vX.Y.Z` de GitHub) y crea `data/version-fija.txt`, que desactiva el auto-update. Para volver a seguir la última: `node update.js latest`. Solo se queda fijada si la versión destino es 2.1.11 o posterior (las anteriores no conocen la fijación y se actualizarían solas). Al publicar una versión nueva: `git tag vX.Y.Z && git push --tags`.
+Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `vX.Y.Z` de GitHub) y crea `data/version-fija.txt`, que desactiva el auto-update. Para volver a seguir la última: `node update.js latest`. También desde la cabecera de la app: selector «Versión…» (pide confirmación; muestra 🔒 si hay versión fijada). Solo se queda fijada si la versión destino es 2.1.11 o posterior (las anteriores no conocen la fijación y se actualizarían solas). Al publicar una versión nueva: `git tag vX.Y.Z && git push --tags`.
 
 ## Diagnóstico de problemas de conexión
 

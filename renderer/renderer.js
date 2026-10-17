@@ -36,6 +36,18 @@ const api = {
     if (!r.ok) throw new Error(data.error || 'No se pudo comprobar');
     return data;
   }),
+  versiones: () => fetch('/api/versiones').then(async (r) => {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo obtener la lista');
+    return data;
+  }),
+  cambiarVersion: (version) => fetch('/api/version', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version })
+  }).then(async (r) => {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo cambiar de versión');
+    return data;
+  }),
   actualizar: () => fetch('/api/actualizar', { method: 'POST' }).then(async (r) => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'No se pudo actualizar');
@@ -510,6 +522,40 @@ $('btnActualizar').addEventListener('click', async () => {
   }
 });
 
+// Selector de versión (downgrade de emergencia). Se rellena al cargar; sin conexión queda desactivado.
+async function cargarVersiones() {
+  const sel = $('selVersion');
+  try {
+    const { actual, fijada, versiones } = await api.versiones();
+    sel.innerHTML = '<option value="">Versión…</option>'
+      + (fijada ? '<option value="latest">Última (automática)</option>' : '')
+      + versiones.filter((v) => v !== actual).map((v) => `<option value="${v}">${v}</option>`).join('');
+    sel.disabled = false;
+    if (fijada) {
+      $('versionTexto').textContent = `v${actual} 🔒`;
+      $('versionTexto').title = 'Versión fijada: no se actualiza sola. Elige «Última (automática)» para volver.';
+    }
+  } catch (_) { /* sin conexion: ignorar */ }
+}
+
+$('selVersion').addEventListener('change', async () => {
+  const sel = $('selVersion');
+  const v = sel.value;
+  if (!v) return;
+  const txt = v === 'latest' ? 'la última versión y activar las actualizaciones automáticas' : `la versión ${v} (se desactivan las actualizaciones automáticas)`;
+  if (!confirm(`¿Instalar ${txt}?`)) { sel.value = ''; return; }
+  sel.disabled = true;
+  try {
+    log(`Instalando ${v === 'latest' ? 'la última versión' : 'la versión ' + v}... puede tardar un minuto.`, 'info');
+    await api.cambiarVersion(v);
+    log('Hecho. Cierra y vuelve a abrir la aplicación para aplicar los cambios.', 'ok');
+  } catch (err) {
+    log('No se pudo cambiar de versión: ' + err.message, 'error');
+  } finally {
+    cargarVersiones();
+  }
+});
+
 $('mensajePlantilla').addEventListener('input', guardarMensaje);
 
 $('chkAutoEnvio').addEventListener('change', async () => {
@@ -747,6 +793,7 @@ function conectarEventos() {
     log('Último error registrado: ' + estadoInicial.ultimoError, 'error');
   }
   conectarEventos();
+  cargarVersiones();
 
   // Aviso no intrusivo si hay version nueva (el arranque ya intenta bajarla).
   api.buscarActualizacion()

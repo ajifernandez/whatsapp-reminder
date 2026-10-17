@@ -160,6 +160,7 @@ main { max-width: 960px; margin: 22px auto; padding: 0 20px; display: flex; flex
 .btn-gris { background: #94a3b8; }
 .btn-gris:hover:not(:disabled) { background: #7c8ba1; }
 .pequeno { padding: 6px 12px; font-size: 13px; }
+select.pequeno { border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; cursor: pointer; }
 
 /* Tabla */
 .tabla-scroll { overflow-x: auto; }

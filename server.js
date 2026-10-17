@@ -567,7 +567,7 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal() }));
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada() }));
 
 // Resumen para soporte remoto: abrir http://localhost:PUERTO/api/diagnostico
 app.get('/api/diagnostico', (_req, res) => {
@@ -604,6 +604,32 @@ const updater = require('./update.js');
 app.get('/api/actualizacion', async (_req, res) => {
   try {
     res.json(await updater.buscarActualizacion());
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/versiones', async (_req, res) => {
+  try {
+    res.json({ actual: updater.versionLocal(), fijada: updater.versionFijada(), versiones: await updater.listarVersiones() });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Downgrade ({version:'2.1.9'}) o volver a seguir la ultima ({version:'latest'}).
+// Como /api/actualizar, el codigo del servidor aplica tras reiniciar.
+app.post('/api/version', async (req, res) => {
+  try {
+    const v = String((req.body || {}).version || '');
+    if (v === 'latest') {
+      updater.quitarFijacion();
+      await updater.aplicarActualizacion();
+    } else {
+      await updater.fijarVersion(v);
+    }
+    registrarLog('aviso', `Cambio de version: ${v}`);
+    res.json({ version: v });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

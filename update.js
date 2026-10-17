@@ -106,7 +106,28 @@ async function aplicarActualizacion(ref = RAMA) {
   return escritos;
 }
 
-module.exports = { buscarActualizacion, aplicarActualizacion, versionLocal, ARCHIVOS };
+const SEMVER = /^\d+\.\d+\.\d+$/;
+
+// Downgrade/pin: instala el tag vX.Y.Z y desactiva el auto-update.
+async function fijarVersion(version) {
+  if (!SEMVER.test(version)) throw new Error('Version invalida: ' + version);
+  const escritos = await aplicarActualizacion('v' + version);
+  fs.mkdirSync(path.dirname(FIJA), { recursive: true });
+  fs.writeFileSync(FIJA, version);
+  return escritos;
+}
+
+const quitarFijacion = () => fs.rmSync(FIJA, { force: true });
+const versionFijada = () => (fs.existsSync(FIJA) ? fs.readFileSync(FIJA, 'utf8').trim() : null);
+
+// Versiones instalables (tags vX.Y.Z de GitHub), de mas nueva a mas antigua.
+async function listarVersiones() {
+  const tags = JSON.parse(await descargar(`https://api.github.com/repos/${REPO}/tags?per_page=100`));
+  return tags.map((t) => t.name.replace(/^v/, '')).filter((v) => SEMVER.test(v))
+    .sort((a, b) => (esMayor(a, b) ? -1 : 1));
+}
+
+module.exports = { buscarActualizacion, aplicarActualizacion, versionLocal, fijarVersion, quitarFijacion, versionFijada, listarVersiones, ARCHIVOS };
 
 // Ejecucion directa (desde Iniciar.bat). Nunca corta el arranque: si falla la
 // red, avisa y sale con 0 para que el servidor arranque con la version actual.
@@ -115,13 +136,11 @@ if (require.main === module) {
     try {
       const arg = process.argv[2];
       if (arg && arg !== 'latest') {
-        if (!/^\d+\.\d+\.\d+$/.test(arg)) return console.log('[update] Version invalida. Uso: node update.js 2.1.9 | latest');
-        const escritos = await aplicarActualizacion('v' + arg);
-        fs.mkdirSync(path.dirname(FIJA), { recursive: true });
-        fs.writeFileSync(FIJA, arg);
+        if (!SEMVER.test(arg)) return console.log('[update] Version invalida. Uso: node update.js 2.1.9 | latest');
+        const escritos = await fijarVersion(arg);
         return console.log(`[update] Version fijada a ${arg} (auto-update desactivado). Ficheros: ${escritos.join(', ')}. Para volver: node update.js latest`);
       }
-      if (arg === 'latest') fs.rmSync(FIJA, { force: true });
+      if (arg === 'latest') quitarFijacion();
       const { local, remota, hayActualizacion, fijada } = await buscarActualizacion();
       if (fijada) return console.log(`[update] Version fijada en ${local}: no se actualiza. Para volver: node update.js latest`);
       if (!hayActualizacion) {
