@@ -838,8 +838,8 @@ function conectarEventos() {
         const v = $('versionTexto');
         v.textContent = `v${info.local} → ${info.remota} disponible`;
         v.classList.add('hay-nueva');
-        v.title = 'Hay una versión más nueva: pulsa «⟳ Actualizar» o reinicia la aplicación';
-        log(`Hay una versión nueva (${info.remota}). Pulsa «⟳ Actualizar» o reinicia la aplicación.`, 'aviso');
+        v.title = 'Hay una versión más nueva: pulsa «⟳ Comprobar versión» o reinicia la aplicación';
+        log(`Hay una versión nueva (${info.remota}). Pulsa «⟳ Comprobar versión» o reinicia la aplicación.`, 'aviso');
       }
     })
     .catch(() => { /* sin conexion: ignorar */ });
