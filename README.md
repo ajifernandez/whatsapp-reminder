@@ -35,7 +35,7 @@ El mensaje que se envía:
 
 ## Actualizaciones automáticas
 
-Al pulsar **Iniciar**, la app se conecta a GitHub y descarga sola la última versión del código antes de arrancar (si no hay internet, sigue con la versión actual). También hay un botón **⟳ Actualizar** en la cabecera para buscar cambios sin reiniciar.
+Al pulsar **Iniciar**, la app se conecta a GitHub y descarga sola la última versión del código antes de arrancar (si no hay internet, sigue con la versión actual). También hay un botón **⟳ Comprobar versión** en la cabecera para buscar cambios (y bajarlos) sin reiniciar.
 
 - Se actualizan el código y los documentos (`server.js`, `update.js`, `renderer/`, `package.json`, `README.md`, `MANUAL_USUARIO.md`); nunca los datos, la sesión ni los binarios empaquetados.
 - Requiere que el repo sea **público**: <https://github.com/ajifernandez/whatsapp-reminder>
