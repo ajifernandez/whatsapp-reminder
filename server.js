@@ -234,6 +234,7 @@ function crearCliente() {
     clientReady = false;
     emitir('estado', 'error');
     emitir('log', { tipo: 'error', texto: 'Error de autenticación: ' + msg });
+    terminarSalud('fallo de autenticación');
   });
 
   c.on('desconectado', (reason) => {
@@ -242,6 +243,7 @@ function crearCliente() {
     clientReady = false;
     emitir('estado', 'desconectado');
     emitir('log', { tipo: 'error', texto: 'Sesión desconectada: ' + reason });
+    terminarSalud('desconexión');
     client = null;
   });
   return c;
@@ -329,6 +331,7 @@ async function iniciarSesion() {
 
 async function cerrarSesion() {
   if (!client) return;
+  terminarSalud('sesión cerrada');
   pararTemporizadorConexion(); // si se cierra a mitad de conectar, que el timeout no salte después
   conectando = false;
   await client.cerrarSesion();
@@ -348,11 +351,54 @@ const INTERVALO_SALUD_MS = Number(process.env.INTERVALO_SALUD_MS) || 60 * 1000; 
 const FALLOS_PARA_AVISAR = 2;
 const salud = { degradada: false, fallosSeguidos: 0, ultimoOk: null, desde: null, causa: null, consejo: null };
 let comprobandoSalud = false;
+const contadores = { comprobaciones: 0, fallos: 0 };
 
+// Historial de incidentes (conexion con problemas): sobrevive a los reinicios, porque lo habitual
+// es reiniciar la aplicacion y mandar el diagnostico despues, cuando el problema ya "se ha ido".
+const SALUD_PATH = path.join(DATA_DIR, 'salud.json');
+const MAX_INCIDENTES = 20;
+let incidentes = (() => {
+  try {
+    const lista = JSON.parse(fs.readFileSync(SALUD_PATH, 'utf8'));
+    // uno abierto de la ejecucion anterior: la aplicacion se cerro sin poder anotar el final
+    return lista.map((i) => (i.hasta ? i : { ...i, hasta: null, fin: 'reinicio de la aplicación' }));
+  } catch (_) { return []; }
+})();
+const guardarIncidentes = () => { try { fs.writeFileSync(SALUD_PATH, JSON.stringify(incidentes.slice(-MAX_INCIDENTES), null, 2)); } catch (_) { /* no es critico */ } };
+
+function abrirIncidente(causa, motivo) {
+  incidentes.push({ desde: Date.now(), hasta: null, fin: null, causa, motivo, motor: Motor.nombre });
+  incidentes = incidentes.slice(-MAX_INCIDENTES);
+  guardarIncidentes();
+}
+// fin: 'recuperada' | 'desconexión' | 'sesión cerrada' | 'aplicación cerrada' | 'reconexión'
+function cerrarIncidente(fin) {
+  const abierto = incidentes[incidentes.length - 1];
+  if (!abierto || abierto.hasta || abierto.fin) return; // ya cerrado (el heredado de un reinicio no tiene hora de fin)
+  abierto.hasta = Date.now();
+  abierto.fin = fin;
+  guardarIncidentes();
+}
+
+const SALUD_LIMPIA = { degradada: false, fallosSeguidos: 0, desde: null, causa: null, consejo: null };
+
+// Nueva conexion: se cierra el incidente que hubiera abierto y se avisa a la pagina
 function reiniciarSalud() {
-  Object.assign(salud, { degradada: false, fallosSeguidos: 0, ultimoOk: Date.now(), desde: null, causa: null, consejo: null });
+  cerrarIncidente('reconexión');
+  Object.assign(salud, SALUD_LIMPIA, { ultimoOk: Date.now() });
+  emitir('salud', datosSalud());
+}
+
+// La conexion termina (corte, sesion cerrada, cambio de motor...): el aviso ya no aplica
+function terminarSalud(fin) {
+  cerrarIncidente(fin);
+  Object.assign(salud, SALUD_LIMPIA);
+  emitir('salud', datosSalud());
 }
 const datosSalud = () => ({ degradada: salud.degradada, fallosSeguidos: salud.fallosSeguidos, ultimoOk: salud.ultimoOk, desde: salud.desde, causa: salud.causa, consejo: salud.consejo });
+const salidaIncidente = (i) => ({ ...i, desde: new Date(i.desde).toISOString(), hasta: i.hasta ? new Date(i.hasta).toISOString() : null, minutos: Math.round(((i.hasta || Date.now()) - i.desde) / 60000) });
+// para el informe de soporte: estado actual + contadores desde el arranque + ultimos incidentes
+const saludParaInforme = () => ({ ...datosSalud(), ...contadores, incidentes: incidentes.slice(-10).map(salidaIncidente) });
 
 // ¿Responde ese servidor? (cualquier respuesta HTTP cuenta; solo importa llegar)
 async function alcanzable(url) {
@@ -379,25 +425,34 @@ async function comprobarSalud() {
   try {
     await c.ping();
     if (!vigente()) return;
+    contadores.comprobaciones++;
     salud.fallosSeguidos = 0;
     salud.ultimoOk = Date.now();
     if (salud.degradada) {
       const minutos = Math.max(1, Math.round((Date.now() - salud.desde) / 60000));
       salud.degradada = false; salud.desde = null; salud.causa = null; salud.consejo = null;
+      cerrarIncidente('recuperada');
       emitir('log', { tipo: 'ok', texto: `Conexión con WhatsApp recuperada (llevaba ~${minutos} min con problemas).` });
       emitir('estado', 'conectado');
       emitir('salud', datosSalud());
     }
   } catch (err) {
     if (!vigente()) return;
+    contadores.comprobaciones++;
+    contadores.fallos++;
     salud.fallosSeguidos++;
     const motivo = err.motivo || (err.sinRespuesta ? 'no contesta' : err.message);
+    // el primer fallo (y cada 5 seguidos) queda en el log del informe, aunque aun no se avise en pantalla
+    if (salud.fallosSeguidos === 1 || salud.fallosSeguidos % 5 === 0) {
+      registrarLog('aviso', `Comprobación de conexión fallida (${salud.fallosSeguidos} seguida${salud.fallosSeguidos > 1 ? 's' : ''}): ${motivo}`);
+    }
     // la primera vez (y cada 5 fallos seguidos) se vuelve a averiguar la causa
     if (salud.fallosSeguidos >= FALLOS_PARA_AVISAR && (!salud.degradada || salud.fallosSeguidos % 5 === 0)) {
       const { causa, consejo } = await clasificarCausa(motivo);
       if (!vigente()) return;
       const nueva = !salud.degradada;
-      if (nueva) salud.desde = Date.now();
+      if (nueva) { salud.desde = Date.now(); abrirIncidente(causa, motivo); }
+      else if (salud.causa !== causa) incidentes[incidentes.length - 1].causa = causa, guardarIncidentes();
       const cambio = nueva || salud.causa !== causa;
       Object.assign(salud, { degradada: true, causa, consejo });
       if (cambio) emitir('log', { tipo: 'aviso', texto: `Conexión con WhatsApp con problemas: ${causa}. Los envíos pueden fallar; se sigue comprobando.` });
@@ -652,6 +707,7 @@ app.post('/api/motor', (req, res) => {
   }
   conectando = false;
   clientReady = false;
+  terminarSalud('cambio de motor');
   Motor = require(MOTORES[id]);
   guardarConfig({ motor: id });
   emitir('estado', 'desconectado');
@@ -719,7 +775,7 @@ async function informeDiagnostico() {
     version: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
-    citas: leerCitas().length, motor: Motor.nombre, salud: datosSalud(),
+    citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(),
     ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
     redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
     log: log.map(anonimizar)
@@ -901,6 +957,7 @@ let cerrando = false;
 async function apagar(motivo) {
   if (cerrando) return;
   cerrando = true;
+  cerrarIncidente('aplicación cerrada'); // sin emitir: la pagina se cierra
   console.log(`\nCerrando de forma segura (${motivo})...`);
   registrarLog('info', `Aplicación cerrada (${motivo}).`);
   setTimeout(() => process.exit(0), 10000).unref(); // si algo se cuelga al cerrar, se sale igual

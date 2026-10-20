@@ -118,7 +118,12 @@ La causa se averigua con dos comprobaciones de red desde Node: `web.whatsapp.com
 - solo falla WhatsApp → WhatsApp inaccesible (caída o bloqueo del antivirus/cortafuegos);
 - responden las dos → la red va bien pero el motor no responde (probable página colgada: «⏻ Apagar» y abrir de nuevo, o cambiar de motor).
 
-No bloquea nada: se puede seguir enviando (los envíos que no reciban respuesta quedan sin marcar). El estado sale en `/api/estado` y en el diagnóstico (`salud`). Para pruebas: `INTERVALO_SALUD_MS` y `SALUD_RED=ok|wa|nada`.
+No bloquea nada: se puede seguir enviando (los envíos que no reciban respuesta quedan sin marcar). Para pruebas: `INTERVALO_SALUD_MS` y `SALUD_RED=ok|wa|nada`.
+
+**Qué queda registrado** (para el diagnóstico, aunque el problema ya se haya ido):
+
+- Registro y `data/app.log`: el paso a «con problemas» (con la causa) y la recuperación. Además, en `app.log` (no en pantalla), el **primer fallo suelto** y cada 5 seguidos: `Comprobación de conexión fallida (N seguidas): motivo`.
+- Diagnóstico, campo `salud`: estado actual, contadores desde el arranque (`comprobaciones`, `fallos`) y los **últimos 10 incidentes** (`desde`, `hasta`, `minutos`, `causa`, `motivo`, `motor` y `fin`: `recuperada`, `desconexión`, `sesión cerrada`, `reconexión`, `cambio de motor`, `aplicación cerrada` o `reinicio de la aplicación`). Se guardan en `data/salud.json`, así que sobreviven a reiniciar la aplicación, que es lo que suele hacerse antes de mandar el informe.
 
 ## Diagnóstico de problemas de conexión
 

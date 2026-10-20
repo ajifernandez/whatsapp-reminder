@@ -11,7 +11,7 @@ const assert = require('assert');
 const RAIZ = path.join(__dirname, '..');
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function arrancar({ sesionWwebjs = false, env = {} } = {}) {
+async function arrancar({ sesionWwebjs = false, env = {}, saludPrevia = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-servidor-'));
   // todos los ficheros de la aplicación: si faltara alguno, el arranque iría a GitHub a por él
   for (const f of JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8')).archivosActualizables) {
@@ -19,6 +19,7 @@ async function arrancar({ sesionWwebjs = false, env = {} } = {}) {
     fs.copyFileSync(path.join(RAIZ, f), path.join(dir, f));
   }
   if (sesionWwebjs) fs.mkdirSync(path.join(dir, '.wwebjs_auth', 'session'), { recursive: true });
+  if (saludPrevia) { fs.mkdirSync(path.join(dir, 'data'), { recursive: true }); fs.writeFileSync(path.join(dir, 'data', 'salud.json'), JSON.stringify(saludPrevia)); }
   fs.symlinkSync(path.join(RAIZ, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   const puerto = 3900 + Math.floor(Math.random() * 90);
   const proc = spawn(process.execPath, ['-r', path.join(__dirname, 'motor-falso.js'), 'server.js'], {
@@ -131,17 +132,52 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
       assert.ok(e.salud.consejo && e.salud.desde, 'con consejo y hora de inicio');
       let diag = await s.api('/api/diagnostico');
       assert.ok(diag.log.some((l) => l.includes('Conexión con WhatsApp con problemas')));
+      assert.ok(diag.log.some((l) => l.includes('Comprobación de conexión fallida (1 seguida)')), 'el primer fallo suelto también queda en el log del informe');
       assert.equal(diag.salud.degradada, true);
+      assert.ok(diag.salud.comprobaciones >= 3 && diag.salud.fallos >= 2, 'contadores desde el arranque');
+      assert.equal(diag.salud.incidentes.length, 1);
+      assert.match(diag.salud.incidentes[0].causa, texto);
+      assert.equal(diag.salud.incidentes[0].hasta, null, 'incidente abierto');
+      assert.match(diag.salud.incidentes[0].desde, /^\d{4}-\d\d-\d\dT/);
       if (red === 'ok') {
         fs.rmSync(path.join(s.dir, 'ping_falla'));
         const r = await esperarCon(s, (x) => x.estado === 'conectado');
         assert.equal(r.salud.degradada, false);
         diag = await s.api('/api/diagnostico');
         assert.ok(diag.log.some((l) => l.includes('Conexión con WhatsApp recuperada')));
+        assert.equal(diag.salud.incidentes[0].fin, 'recuperada');
+        assert.ok(diag.salud.incidentes[0].hasta, 'incidente cerrado con su hora de fin');
       }
       ok(`salud (${red}): degradado con la causa correcta${red === 'ok' ? ' y recuperación a conectado' : ''}`);
     } finally { await s.cerrar(); }
   }
+
+  // el incidente tambien termina si la conexion se corta estando con problemas, y el aviso desaparece
+  s = await arrancar({ env: { INTERVALO_SALUD_MS: '150', SALUD_RED: 'ok' } });
+  try {
+    await s.esperarEstado('conectado');
+    fs.writeFileSync(path.join(s.dir, 'ping_falla'), '');
+    await esperarCon(s, (x) => x.estado === 'degradado');
+    s.orden('desconectar');
+    const e = await esperarCon(s, (x) => x.estado === 'desconectado');
+    assert.equal(e.salud.degradada, false, 'sin aviso de salud si no hay conexion');
+    const inc = (await s.api('/api/diagnostico')).salud.incidentes;
+    assert.equal(inc.length, 1);
+    assert.equal(inc[0].fin, 'desconexión');
+    assert.ok(inc[0].hasta);
+    ok('un corte estando con problemas cierra el incidente (fin: desconexión) y limpia el aviso');
+  } finally { await s.cerrar(); }
+
+  // un incidente que quedo abierto al cerrarse la aplicacion se muestra como cerrado por el reinicio
+  s = await arrancar({ saludPrevia: [{ desde: Date.parse('2026-10-01T10:00:00Z'), hasta: null, fin: null, causa: 'Sin internet', motivo: 'no contesta', motor: 'baileys' }] });
+  try {
+    await s.esperarEstado('conectado');
+    const inc = (await s.api('/api/diagnostico')).salud.incidentes;
+    assert.equal(inc.length, 1);
+    assert.equal(inc[0].fin, 'reinicio de la aplicación');
+    assert.equal(inc[0].causa, 'Sin internet');
+    ok('el historial de incidentes sobrevive a los reinicios (uno abierto se marca «reinicio de la aplicación»)');
+  } finally { await s.cerrar(); }
 
   // envio automatico: cita en las proximas horas con WhatsApp sin responder -> sin marcar y en pausa
   s = await arrancar({ env: { INTERVALO_AUTO_MS: '200' } });
