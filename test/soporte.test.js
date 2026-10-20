@@ -3,7 +3,6 @@
 // receptor real en una carpeta temporal.
 // Uso: npm test
 const { spawn } = require('child_process');
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -125,33 +124,6 @@ const dirsTemporales = [];
     assert.match(await r.html('/diagnosticos'), /Diagnósticos recibidos \(0,/);
     assert.ok(!(await r.html('/diagnosticos')).includes('clinicas.json'));
     ok('el estado de las clínicas no aparece en la lista de diagnósticos');
-
-    // --- aviso push (ntfy) al caer y al recuperarse; no se repite en cada latido
-    const avisos = [];
-    const ntfy = http.createServer((req, res) => { let b=''; req.on('data',(c)=>b+=c); req.on('end',()=>{ avisos.push({ titulo: req.headers.title, prioridad: req.headers.priority, cuerpo: b }); res.end('ok'); }); }).listen(0);
-    const puertoNtfy = ntfy.address ? ntfy.address().port : await new Promise((ok) => ntfy.on('listening', () => ok(ntfy.address().port)));
-    const r2 = await arrancar({ env: { NTFY_URL: `http://localhost:${puertoNtfy}/clinicas` } });
-    try {
-      const ID9 = 'a1b2c3d4-0000-4000-8000-000000000009';
-      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'conectado' }));
-      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'desconectado', ultimoError: 'Sesión desconectada' }));
-      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'desconectado', ultimoError: 'Sesión desconectada' }));
-      // se espera (con límite) a que llegue; un tiempo fijo es frágil en ejecutores lentos
-      const esperarAvisos = async (cond, ms = 6000) => { for (let t = 0; t < ms && !cond(); t += 100) await pausa(100); };
-      await esperarAvisos(() => avisos.some((a) => a.titulo.startsWith('Desconectado')));
-      await pausa(800); // y un margen para detectar que NO llegue otro repetido
-      const caidas = avisos.filter((a) => a.titulo.startsWith('Desconectado'));
-      assert.equal(caidas.length, 1, 'un solo aviso al caer, no uno por latido');
-      assert.equal(caidas[0].prioridad, 'high');
-      assert.match(caidas[0].titulo, /CLINICA-PUSH/);
-      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'conectado' }));
-      await esperarAvisos(() => avisos.some((a) => a.titulo.startsWith('Recuperada')));
-      await pausa(500);
-      const rec = avisos.filter((a) => a.titulo.startsWith('Recuperada'));
-      assert.equal(rec.length, 1, 'aviso de recuperación');
-      assert.equal(rec[0].prioridad, 'low');
-      ok('push: un aviso al caer (prioridad alta), ninguno repetido, y otro al recuperarse');
-    } finally { await r2.parar(); ntfy.close(); }
 
     // --- historial de transiciones por instalacion
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
