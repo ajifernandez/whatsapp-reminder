@@ -448,7 +448,8 @@ function pintarSalud(s) {
   const caja = $('avisoSalud');
   if (!s || !s.degradada) {
     caja.classList.add('oculto');
-    if (degradadaAntes) toast('Conexión con WhatsApp recuperada.', 'ok');
+    // solo se felicita si sigue conectado: un corte o un cambio de motor tambien limpia el aviso
+    if (degradadaAntes && conectado) toast('Conexión con WhatsApp recuperada.', 'ok');
     degradadaAntes = false;
     $('estadoTexto').title = '';
     return;
