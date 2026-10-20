@@ -78,9 +78,9 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
 - `server.js` — servidor web local (Express): estados de conexión, envío por lotes con pausas, envío automático, diagnóstico.
 - `motores/` — cómo se habla con WhatsApp (misma interfaz en los dos, ver cabecera de `motores/wwebjs.js`):
-  - `baileys.js` — por WebSocket, sin navegador. Vincula con QR o con código. Usa `vendor/baileys.bundle.mjs`.
+  - `baileys.js` — **experimental**, por WebSocket, sin navegador. Vincula con QR o con código. Usa `vendor/baileys.bundle.mjs`. **No usar para pacientes**: con él, algunos móviles (probado en Android e iPhone) no llegan a descifrar los mensajes y se quedan en «Esperando el mensaje…», incluso tras el reenvío que pide el móvil (fallo abierto en Baileys: #2297, #2827; octubre 2026).
   - `wwebjs.js` — whatsapp-web.js: Chromium oculto con web.whatsapp.com (el de la 2.x).
-  - Se elige en la página («Motor», bajo «Conectar WhatsApp») o con `"motor"` en `data/config.json`. Por defecto: Baileys en instalaciones nuevas; las que ya usaban whatsapp-web.js siguen con él (sin volver a vincular) hasta que se cambie. Cada motor tiene su propia vinculación; si el elegido no está vinculado, la página avisa.
+  - Se elige en la página («Motor», bajo «Conectar WhatsApp») o con `"motor"` en `data/config.json`. Por defecto **whatsapp-web.js** en todas. Baileys solo se usa si se elige a mano en el selector (`motorElegido` en `data/config.json`), que avisa de que es experimental; las instalaciones que lo tenían guardado sin elegirlo (motor por defecto de la 2.2.0 a la 2.4.0) pasan a whatsapp-web.js al arrancar, con un aviso en el registro. Cada motor tiene su propia vinculación; si el elegido no está vinculado, la página avisa.
 - `vendor/baileys.bundle.mjs` — Baileys 6.7.24 empaquetado en un fichero (la portable no tiene npm). Se regenera con `npm run build:baileys`. La 7.0 (release candidate) la rechaza WhatsApp a fecha de 2026-10.
 - `update.js` — auto-actualizador desde GitHub (se ejecuta antes de `server.js`).
 - `test/` — `npm test`: updater, motor Baileys y servidor con un motor falso; sin red ni WhatsApp.
