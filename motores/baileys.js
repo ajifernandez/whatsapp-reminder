@@ -6,6 +6,7 @@ const EventEmitter = require('events');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const { sinRespuesta, conLimite } = require('./comun');
 
 const DIR_APP = path.join(__dirname, '..');
 const AUTH_DIR = path.join(DIR_APP, '.baileys_auth');
@@ -62,7 +63,7 @@ async function diagnostico() {
 const silencio = { level: 'silent', trace() {}, debug() {}, info() {}, warn() {}, error() {}, fatal() {}, child() { return silencio; } };
 
 // libreria: solo para las pruebas (sustituye al bundle)
-function crear({ log, libreria = null }) {
+function crear({ log, libreria = null, esperaIdMs = 20000 }) {
   const motor = new EventEmitter();
   let sock = null;
   let descartado = false;
@@ -129,11 +130,15 @@ function crear({ log, libreria = null }) {
 
   motor.iniciar = () => conectar();
 
+  // Un numero sin WhatsApp NO lanza (exists:false); si lanza o tarda, WhatsApp no responde.
   motor.idDe = async (numero) => {
+    let r;
     try {
-      const [r] = await sock.onWhatsApp(numero + '@s.whatsapp.net');
-      return r && r.exists ? r.jid : null;
-    } catch (_) { return null; }
+      [r] = await conLimite(sock.onWhatsApp(numero + '@s.whatsapp.net'), esperaIdMs);
+    } catch (_) {
+      throw sinRespuesta();
+    }
+    return r && r.exists ? r.jid : null;
   };
   motor.enviar = (id, texto) => sock.sendMessage(id, { text: texto });
 

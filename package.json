@@ -25,6 +25,7 @@
   "archivosActualizables": [
     "server.js",
     "update.js",
+    "motores/comun.js",
     "motores/wwebjs.js",
     "vendor/baileys.bundle.mjs",
     "motores/baileys.js",

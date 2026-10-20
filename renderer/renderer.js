@@ -574,6 +574,9 @@ $('btnEnviar').addEventListener('click', async () => {
     const r = await api.enviar(citas);
     log(`Terminado: ${r.enviados} enviados, ${r.fallidos} fallidos, ${r.omitidos} omitidos.`,
       r.fallidos > 0 ? 'aviso' : 'ok');
+    if (r.sinRespuesta > 0) {
+      log(`${r.sinRespuesta} cita(s) sin comprobar: WhatsApp no respondió. No se han marcado; vuelve a enviarlas cuando se recupere la conexión.`, 'aviso');
+    }
   } catch (err) {
     log(err.message, 'error');
   } finally {

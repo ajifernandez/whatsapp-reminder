@@ -348,11 +348,18 @@ function normalizarTelefono(telefono) {
   return /^[6789]\d{8}$/.test(numero) ? '34' + numero : numero;
 }
 
-// envía el recordatorio de una cita; devuelve 'enviado' | 'omitido' | 'fallido'
+// envía el recordatorio de una cita; devuelve 'enviado' | 'omitido' | 'fallido' | 'sin_respuesta'
+// ('sin_respuesta': WhatsApp no contestó al comprobar el número; la cita NO se marca)
 async function enviarUna(cita, mensaje) {
   const numero = normalizarTelefono(cita.telefono);
-
-  const id = await client.idDe(numero); // null: número no válido o sin WhatsApp
+  let id;
+  try {
+    id = await client.idDe(numero); // null: número no válido o sin WhatsApp
+  } catch (err) {
+    if (!err.sinRespuesta) throw err;
+    emitir('log', { tipo: 'error', texto: `Error con ${cita.nombre || 'Sin nombre'} (${cita.telefono}): WhatsApp no responde, no se pudo comprobar el número. No se marca como omitido.` });
+    return 'sin_respuesta';
+  }
   if (!id) {
     emitir('log', { tipo: 'aviso', texto: `${cita.nombre || 'Sin nombre'} (${cita.telefono}): el número no es válido o no tiene WhatsApp, no se envió.` });
     return 'omitido';
@@ -395,8 +402,8 @@ async function enviarRecordatorios(citas) {
 
   const lista = Array.isArray(citas) ? citas : [];
   const { mensaje } = leerConfig();
-  let enviados = 0, fallidos = 0, omitidos = 0;
-  const porEstado = { enviado: [], fallido: [], omitido: [] };
+  let enviados = 0, fallidos = 0, omitidos = 0, sinRespuesta = 0, seguidosSinRespuesta = 0;
+  const porEstado = { enviado: [], fallido: [], omitido: [] }; // sin_respuesta no se marca: se podrá reintentar
 
   for (let i = 0; i < lista.length; i++) {
     const cita = lista[i];
@@ -422,22 +429,34 @@ async function enviarRecordatorios(citas) {
     }
 
     const resultado = await enviarUna(cita, mensaje);
-    porEstado[resultado].push(cita);
+    if (porEstado[resultado]) porEstado[resultado].push(cita);
     if (resultado === 'enviado') enviados++;
     else if (resultado === 'fallido') fallidos++;
+    else if (resultado === 'sin_respuesta') sinRespuesta++;
     else omitidos++;
     emitir('progreso', { hecho: i + 1, total: lista.length });
+
+    // Con la pagina colgada cada consulta tarda decenas de segundos en fallar: no seguir
+    // con todo el lote. Las citas que faltan quedan sin tocar.
+    seguidosSinRespuesta = resultado === 'sin_respuesta' ? seguidosSinRespuesta + 1 : 0;
+    if (seguidosSinRespuesta >= 2) {
+      sinRespuesta += lista.length - (i + 1);
+      emitir('log', { tipo: 'error', texto: 'WhatsApp no responde: envío detenido. Las citas sin enviar no se han marcado. Cierra la aplicación con «⏻ Apagar» y ábrela de nuevo, o cambia de motor en «Motor».' });
+      break;
+    }
   }
 
   for (const [estado, marcadas] of Object.entries(porEstado)) {
     if (marcadas.length) marcarEstadoEnvio(marcadas, estado);
   }
-  return { enviados, fallidos, omitidos, total: lista.length };
+  return { enviados, fallidos, omitidos, sinRespuesta, total: lista.length };
 }
 
 // ---------- Envío automático (24 h antes de la cita) ----------
 const HORAS_ANTELACION = 24;
-const INTERVALO_AUTO_MS = 45 * 1000;
+const INTERVALO_AUTO_MS = Number(process.env.INTERVALO_AUTO_MS) || 45 * 1000; // variable: solo para pruebas
+const PAUSA_AUTO_SIN_RESPUESTA_MS = 5 * 60 * 1000;
+let autoPausadoHasta = 0;
 
 function fechaHoraCita(cita) {
   const fLimpia = limpiarString(cita.fecha);
@@ -471,7 +490,7 @@ function fechaHoraCita(cita) {
 
 let autoEnvioEnCurso = false;
 async function cicloAutoEnvio() {
-  if (autoEnvioEnCurso || !clientReady) return;
+  if (autoEnvioEnCurso || !clientReady || Date.now() < autoPausadoHasta) return;
   const config = leerConfig();
   if (!config.autoEnvio) return;
 
@@ -492,6 +511,12 @@ async function cicloAutoEnvio() {
       if (!clientReady) break;
       if (i > 0) await pausa(2500 + Math.random() * 2500);
       const resultado = await enviarUna(pendientes[i], config.mensaje);
+      if (resultado === 'sin_respuesta') {
+        // no es culpa de la cita: sin marcar, y se espera antes de volver a intentarlo
+        autoPausadoHasta = Date.now() + PAUSA_AUTO_SIN_RESPUESTA_MS;
+        emitir('log', { tipo: 'aviso', texto: `Envío automático en pausa ${PAUSA_AUTO_SIN_RESPUESTA_MS / 60000} min: WhatsApp no responde. Las citas pendientes se reintentarán.` });
+        break;
+      }
       // se marca también si falló, para no reintentar cada minuto y saturar
       marcarEstadoEnvio([pendientes[i]], resultado);
     }
