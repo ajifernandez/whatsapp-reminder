@@ -151,6 +151,28 @@ async function aplicarActualizacion(ref = canal()) {
   return escritos;
 }
 
+// Ficheros de la lista LOCAL que faltan: pasa cuando una version nueva la instala un
+// updater antiguo (<= 2.1.16), que solo bajaba su propia lista fija. Se descargan del tag
+// de la version instalada. Devuelve los reparados (vacio si no faltaba nada).
+async function repararFaltantes() {
+  let lista = ARCHIVOS;
+  try {
+    const l = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).archivosActualizables;
+    if (Array.isArray(l) && l.length && l.every(RUTA_VALIDA)) lista = l;
+  } catch { /* sin package.json legible: la lista minima */ }
+  const faltan = lista.filter((rel) => !fs.existsSync(path.join(__dirname, rel)));
+  if (!faltan.length) return [];
+  const ref = 'v' + versionLocal();
+  const contenidos = {};
+  for (const rel of faltan) contenidos[rel] = await descargar(rawBase(ref) + '/' + rel);
+  for (const rel of faltan) {
+    const destino = path.join(__dirname, rel);
+    fs.mkdirSync(path.dirname(destino), { recursive: true });
+    fs.writeFileSync(destino, contenidos[rel]);
+  }
+  return faltan;
+}
+
 const SEMVER = /^\d+\.\d+\.\d+$/;
 
 // Downgrade/pin: instala el tag vX.Y.Z y desactiva el auto-update.
@@ -172,7 +194,7 @@ async function listarVersiones() {
     .sort((a, b) => (esMayor(a, b) ? -1 : 1));
 }
 
-module.exports = { buscarActualizacion, aplicarActualizacion, versionLocal, fijarVersion, quitarFijacion, versionFijada, listarVersiones, canal, fijarCanal, ARCHIVOS };
+module.exports = { buscarActualizacion, aplicarActualizacion, repararFaltantes, versionLocal, fijarVersion, quitarFijacion, versionFijada, listarVersiones, canal, fijarCanal, ARCHIVOS };
 
 // Ejecucion directa (desde Iniciar.bat). Nunca corta el arranque: si falla la
 // red, avisa y sale con 0 para que el servidor arranque con la version actual.

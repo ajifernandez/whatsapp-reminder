@@ -11,10 +11,14 @@ const assert = require('assert');
 const RAIZ = path.join(__dirname, '..');
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function arrancar() {
+async function arrancar({ sesionWwebjs = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-servidor-'));
-  for (const f of ['server.js', 'update.js', 'package.json']) fs.copyFileSync(path.join(RAIZ, f), path.join(dir, f));
-  fs.cpSync(path.join(RAIZ, 'renderer'), path.join(dir, 'renderer'), { recursive: true });
+  // todos los ficheros de la aplicación: si faltara alguno, el arranque iría a GitHub a por él
+  for (const f of JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8')).archivosActualizables) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.copyFileSync(path.join(RAIZ, f), path.join(dir, f));
+  }
+  if (sesionWwebjs) fs.mkdirSync(path.join(dir, '.wwebjs_auth', 'session'), { recursive: true });
   fs.symlinkSync(path.join(RAIZ, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   const puerto = 3900 + Math.floor(Math.random() * 90);
   const proc = spawn(process.execPath, ['-r', path.join(__dirname, 'motor-falso.js'), 'server.js'], {
@@ -52,6 +56,8 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
   try {
     await s.esperarEstado('conectado');
     ok('con sesion guardada reconecta solo al arrancar');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motor, 'baileys');
+    ok('instalación nueva: motor por defecto Baileys');
 
     const r = await s.api('/api/enviar', [cita('Ana', '612345678'), cita('Sin WhatsApp', '611111000'), cita('Incompleta', '')]);
     assert.deepEqual(r, { enviados: 1, fallidos: 0, omitidos: 2, total: 3 });
@@ -81,9 +87,12 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     ok('cambio de motor: valida, se guarda en config.json y reconecta');
   } finally { await s.cerrar(); }
 
-  s = await arrancar();
+  s = await arrancar({ sesionWwebjs: true });
   try {
     await s.esperarEstado('conectado');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motor, 'wwebjs');
+    ok('instalación que ya usaba whatsapp-web.js: sigue con wwebjs (sin revincular)');
+
     s.orden('fallo_auth');
     await pausa(300);
     const e = await s.api('/api/estado');
