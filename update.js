@@ -9,9 +9,10 @@
 // Seguridad ante cortes de red: primero baja TODO a memoria y solo si baja
 // entero se escribe a disco. Asi un corte a mitad no deja ficheros corruptos.
 //
-// Uso directo:  node update.js            -> comprueba y aplica
+// Uso directo:  node update.js            -> comprueba y aplica (solo dentro de la misma version mayor)
 //               node update.js 2.1.9      -> downgrade: instala esa version y desactiva el auto-update
-//               node update.js latest     -> quita la fijacion y actualiza
+//               node update.js latest     -> quita la fijacion y actualiza, aunque sea a otra version mayor
+//               node update.js canal v3   -> esta clinica sigue la rama v3 (beta); 'canal main' vuelve a estable
 // Como modulo:  require('./update.js')    -> buscarActualizacion / aplicarActualizacion
 
 const fs = require('fs');
@@ -24,9 +25,31 @@ const rawBase = (ref) => `https://raw.githubusercontent.com/${REPO}/${ref}`;
 // Si existe, el auto-update queda desactivado y la app se queda en esa version
 // (downgrade). 'node update.js latest' lo borra.
 const FIJA = path.join(__dirname, 'data', 'version-fija.txt');
+// Rama que sigue esta clinica (beta). Sin fichero: main (estable).
+const CANAL = path.join(__dirname, 'data', 'canal.txt');
+const RAMA_VALIDA = /^[\w.-]+$/;
 
-// Ficheros que se actualizan. NO incluir node_modules/, chrome/, bin/, data/
-// ni .wwebjs_* (binarios pesados, datos locales o sesion).
+function canal() {
+  try {
+    const r = fs.readFileSync(CANAL, 'utf8').trim();
+    return RAMA_VALIDA.test(r) ? r : RAMA;
+  } catch {
+    return RAMA;
+  }
+}
+
+function fijarCanal(rama) {
+  if (!RAMA_VALIDA.test(rama)) throw new Error('Rama invalida: ' + rama);
+  if (rama === RAMA) return fs.rmSync(CANAL, { force: true });
+  fs.mkdirSync(path.dirname(CANAL), { recursive: true });
+  fs.writeFileSync(CANAL, rama);
+}
+
+// Lista minima de ficheros, para versiones (tags antiguos) cuyo package.json no
+// trae 'archivosActualizables'. La lista real viene del remoto: si la tomaramos
+// de aqui, una version nueva que anade ficheros bajaria un server.js que los
+// necesita sin bajarlos. NO incluir node_modules/, chrome/, bin/, data/ ni
+// .wwebjs_* (binarios pesados, datos locales o sesion).
 const ARCHIVOS = [
   'server.js',
   'update.js',
@@ -70,6 +93,8 @@ function versionLocal() {
   }
 }
 
+const mayorDe = (v) => parseInt(String(v).split('.')[0], 10) || 0;
+
 // Compara semver simple (a > b). Evita "actualizar" a una version igual o menor.
 function esMayor(a, b) {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
@@ -81,23 +106,43 @@ function esMayor(a, b) {
   return false;
 }
 
-async function buscarActualizacion() {
+// En el canal estable, el salto de version mayor (2.x -> 3.0) nunca es automatico:
+// se informa en 'nuevaMayor' y hay que pedirlo ('latest' o el selector de version).
+// En un canal beta, elegir el canal ya es el consentimiento.
+async function buscarActualizacion({ ignorarFreno = false } = {}) {
   const local = versionLocal();
   if (fs.existsSync(FIJA)) return { local, remota: local, hayActualizacion: false, fijada: true };
-  const remotaPkg = JSON.parse(await descargar(rawBase(RAMA) + '/package.json'));
+  const rama = canal();
+  const remotaPkg = JSON.parse(await descargar(rawBase(rama) + '/package.json'));
   const remota = remotaPkg.version || '0.0.0';
-  return { local, remota, hayActualizacion: esMayor(remota, local) };
+  const hay = esMayor(remota, local);
+  if (hay && !ignorarFreno && rama === RAMA && mayorDe(remota) > mayorDe(local)) {
+    return { local, remota, hayActualizacion: false, nuevaMayor: remota, canal: rama };
+  }
+  return { local, remota, hayActualizacion: hay, canal: rama };
+}
+
+// Ruta relativa segura dentro de la carpeta de la app.
+const RUTA_VALIDA = (rel) => typeof rel === 'string' && /^[\w][\w./-]*$/.test(rel) && !rel.split('/').includes('..');
+
+async function archivosDe(ref) {
+  try {
+    const lista = JSON.parse(await descargar(rawBase(ref) + '/package.json')).archivosActualizables;
+    if (Array.isArray(lista) && lista.length && lista.every(RUTA_VALIDA)) return lista;
+  } catch { /* sin lista remota: la minima */ }
+  return ARCHIVOS;
 }
 
 // Baja todos los ficheros a memoria y, si van todos, los escribe. Devuelve
 // la lista de ficheros actualizados.
-async function aplicarActualizacion(ref = RAMA) {
+async function aplicarActualizacion(ref = canal()) {
+  const archivos = await archivosDe(ref);
   const contenidos = {};
-  for (const rel of ARCHIVOS) {
+  for (const rel of archivos) {
     contenidos[rel] = await descargar(rawBase(ref) + '/' + rel);
   }
   const escritos = [];
-  for (const rel of ARCHIVOS) {
+  for (const rel of archivos) {
     const destino = path.join(__dirname, rel);
     fs.mkdirSync(path.dirname(destino), { recursive: true });
     fs.writeFileSync(destino, contenidos[rel]);
@@ -127,7 +172,7 @@ async function listarVersiones() {
     .sort((a, b) => (esMayor(a, b) ? -1 : 1));
 }
 
-module.exports = { buscarActualizacion, aplicarActualizacion, versionLocal, fijarVersion, quitarFijacion, versionFijada, listarVersiones, ARCHIVOS };
+module.exports = { buscarActualizacion, aplicarActualizacion, versionLocal, fijarVersion, quitarFijacion, versionFijada, listarVersiones, canal, fijarCanal, ARCHIVOS };
 
 // Ejecucion directa (desde Iniciar.bat). Nunca corta el arranque: si falla la
 // red, avisa y sale con 0 para que el servidor arranque con la version actual.
@@ -135,14 +180,20 @@ if (require.main === module) {
   (async () => {
     try {
       const arg = process.argv[2];
+      if (arg === 'canal') {
+        fijarCanal(process.argv[3] || RAMA);
+        console.log(`[update] Canal: ${canal()}${canal() === RAMA ? ' (estable)' : ' (beta)'}`);
+        return;
+      }
       if (arg && arg !== 'latest') {
         if (!SEMVER.test(arg)) return console.log('[update] Version invalida. Uso: node update.js 2.1.9 | latest');
         const escritos = await fijarVersion(arg);
         return console.log(`[update] Version fijada a ${arg} (auto-update desactivado). Ficheros: ${escritos.join(', ')}. Para volver: node update.js latest`);
       }
       if (arg === 'latest') quitarFijacion();
-      const { local, remota, hayActualizacion, fijada } = await buscarActualizacion();
+      const { local, remota, hayActualizacion, fijada, nuevaMayor } = await buscarActualizacion({ ignorarFreno: arg === 'latest' });
       if (fijada) return console.log(`[update] Version fijada en ${local}: no se actualiza. Para volver: node update.js latest`);
+      if (nuevaMayor) return console.log(`[update] Hay una version mayor nueva (${nuevaMayor}); no se instala sola. Para instalarla: node update.js latest`);
       if (!hayActualizacion) {
         console.log(`[update] Ya estas en la ultima version (${local}).`);
         return;

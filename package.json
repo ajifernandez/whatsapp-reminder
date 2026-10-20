@@ -4,7 +4,8 @@
   "description": "Servidor web local para enviar recordatorios de citas por WhatsApp",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/update.test.js"
   },
   "keywords": [
     "whatsapp",
@@ -19,5 +20,16 @@
     "qrcode": "^1.5.3",
     "tesseract.js": "^5.1.1",
     "whatsapp-web.js": "^1.23.0"
-  }
+  },
+  "archivosActualizables": [
+    "server.js",
+    "update.js",
+    "package.json",
+    "README.md",
+    "MANUAL_USUARIO.md",
+    "renderer/index.html",
+    "renderer/renderer.js",
+    "renderer/parser.js",
+    "renderer/styles.css"
+  ]
 }
