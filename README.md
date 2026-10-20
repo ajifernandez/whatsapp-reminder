@@ -170,4 +170,4 @@ Campos útiles del informe para un cuelgue de conexión:
 - En el log, líneas `[conexión +Ns]`: «Chromium lanzado», «Página creada», peticiones fallidas (`net::ERR_…`) y, a los 45 s sin conectar, los hosts con peticiones pendientes. Dicen en qué fase se atasca. Solo guardan hosts y estados, nunca contenido de la página.
 - Las rutas salen sin el nombre de usuario de Windows (`C:\Users\<usuario>\…`).
 
-El log completo está en `data/app.log` (se recorta solo a 512 KB). Borrar `.wwebjs_auth` es el último recurso: pierde la sesión y obliga a volver a vincular.
+El informe lleva **todo el log desde que arrancó la aplicación** (mínimo las últimas 80 líneas, para tener contexto; si pasa de ~200 KB se omiten las más antiguas y se indica cuántas) y `lineasDesdeArranque`. El log completo está en `data/app.log` (se recorta solo a 512 KB). Borrar `.wwebjs_auth` es el último recurso: pierde la sesión y obliga a volver a vincular.
