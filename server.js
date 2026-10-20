@@ -12,7 +12,7 @@ const LOG_PATH = path.join(DATA_DIR, 'app.log');
 const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
 // Motor de WhatsApp (motores/*.js). Se elige con "motor" en data/config.json; cambiarlo
 // requiere reiniciar la aplicacion.
-const MOTORES = { wwebjs: './motores/wwebjs' };
+const MOTORES = { wwebjs: './motores/wwebjs', baileys: './motores/baileys' };
 const MOTOR_POR_DEFECTO = 'wwebjs';
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
@@ -317,6 +317,8 @@ async function iniciarSesion() {
 
 async function cerrarSesion() {
   if (!client) return;
+  pararTemporizadorConexion(); // si se cierra a mitad de conectar, que el timeout no salte después
+  conectando = false;
   await client.cerrarSesion();
   client = null;
   clientReady = false;
@@ -329,11 +331,15 @@ const pausa = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
 const PAUSA_LARGA_CADA = 20; // envíos entre cada pausa larga
 const PAUSA_LARGA_MS = 30 * 1000; // duración de la pausa larga
 
+// solo dígitos; número español sin prefijo (9 dígitos empezando por 6/7/8/9): añadir 34
+function normalizarTelefono(telefono) {
+  const numero = String(telefono).replace(/\D/g, '');
+  return /^[6789]\d{8}$/.test(numero) ? '34' + numero : numero;
+}
+
 // envía el recordatorio de una cita; devuelve 'enviado' | 'omitido' | 'fallido'
 async function enviarUna(cita, mensaje) {
-  let numero = String(cita.telefono).replace(/\D/g, '');
-  // número español sin prefijo (9 dígitos empezando por 6/7/8/9): añadir 34
-  if (/^[6789]\d{8}$/.test(numero)) numero = '34' + numero;
+  const numero = normalizarTelefono(cita.telefono);
 
   const id = await client.idDe(numero); // null: número no válido o sin WhatsApp
   if (!id) {
@@ -524,7 +530,7 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada() }));
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre }));
 
 // El log lleva nombres y telefonos de pacientes: se quitan antes de sacarlo del equipo.
 function anonimizar(linea) {
@@ -608,6 +614,21 @@ app.post('/api/enviar-diagnostico', async (_req, res) => {
 });
 
 app.post('/api/conectar', (_req, res) => { iniciarSesion(); res.json({ ok: true }); });
+
+// Vincular sin cámara (solo motores que lo admiten, p. ej. Baileys): con «Conectar»
+// ya pulsado, devuelve el código que se introduce en el móvil.
+app.post('/api/vincular-codigo', async (req, res) => {
+  if (!client || typeof client.pedirCodigo !== 'function') return res.status(400).json({ error: 'Pulsa antes «Conectar WhatsApp» (o este motor no admite código).' });
+  const numero = normalizarTelefono((req.body || {}).telefono || '');
+  if (numero.length < 10) return res.status(400).json({ error: 'Escribe el número del móvil que vas a vincular' });
+  try {
+    const codigo = await client.pedirCodigo(numero);
+    emitir('log', { tipo: 'info', texto: 'Código de vinculación generado. Introdúcelo en el móvil: WhatsApp → Dispositivos vinculados → Vincular con el número de teléfono.' });
+    res.json({ codigo });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 app.post('/api/cerrar', async (_req, res) => { await cerrarSesion(); res.json({ ok: true }); });
 

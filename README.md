@@ -65,8 +65,8 @@ El puerto se puede cambiar con la variable `PORT` (ej. `PORT=4000 npm start`).
 
 Todo queda en la propia carpeta del programa:
 
-- `data/citas.json` — las citas.
-- `.wwebjs_auth/` — la sesión de WhatsApp (para no re-escanear el QR cada vez).
+- `data/citas.json` — las citas; `data/config.json` — mensaje, envío automático y motor.
+- `.baileys_auth/` (motor Baileys) o `.wwebjs_auth/` (motor whatsapp-web.js) — la sesión de WhatsApp (para no volver a vincular cada vez).
 
 Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
@@ -74,8 +74,14 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
 ## Estructura del proyecto
 
-- `server.js` — servidor web local (Express) + lógica de WhatsApp.
+- `server.js` — servidor web local (Express): estados de conexión, envío por lotes con pausas, envío automático, diagnóstico.
+- `motores/` — cómo se habla con WhatsApp (misma interfaz en los dos, ver cabecera de `motores/wwebjs.js`):
+  - `baileys.js` — por WebSocket, sin navegador. Vincula con QR o con código. Usa `vendor/baileys.bundle.mjs`.
+  - `wwebjs.js` — whatsapp-web.js: Chromium oculto con web.whatsapp.com (el de la 2.x).
+  - Se elige con `"motor": "baileys"` o `"wwebjs"` en `data/config.json`; cambiarlo requiere reiniciar y volver a vincular.
+- `vendor/baileys.bundle.mjs` — Baileys 6.7.24 empaquetado en un fichero (la portable no tiene npm). Se regenera con `npm run build:baileys`. La 7.0 (release candidate) la rechaza WhatsApp a fecha de 2026-10.
 - `update.js` — auto-actualizador desde GitHub (se ejecuta antes de `server.js`).
+- `test/` — `npm test`: updater, motor Baileys y servidor con un motor falso; sin red ni WhatsApp.
 - `renderer/` — interfaz del navegador (`index.html`, `styles.css`, `renderer.js`, `parser.js`).
 - `Iniciar.bat` / `Iniciar.sh` — lanzadores de doble clic (Windows / Linux).
 - `Makefile` — `make prepare_portable_dist` regenera el ZIP portable de Windows.

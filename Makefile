@@ -37,5 +37,5 @@ prepare_portable_dist:
 # Windows), sin sesion previa ni citas de pruebas.
 clean_portable_runtime:
 	@echo ">> Limpiando cache/sesion/citas del portable..."
-	@rm -rf "$(PORTABLE_DIR)/.wwebjs_cache" "$(PORTABLE_DIR)/.wwebjs_auth"
+	@rm -rf "$(PORTABLE_DIR)/.wwebjs_cache" "$(PORTABLE_DIR)/.wwebjs_auth" "$(PORTABLE_DIR)/.baileys_auth"
 	@rm -f  "$(PORTABLE_DIR)/data/citas.json"

@@ -21,6 +21,13 @@ const api = {
   }).then((r) => r.json()),
   conectar: () => fetch('/api/conectar', { method: 'POST' }),
   cerrarSesion: () => fetch('/api/cerrar', { method: 'POST' }),
+  pedirCodigo: (telefono) => fetch('/api/vincular-codigo', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telefono })
+  }).then(async (r) => {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo obtener el código');
+    return data.codigo;
+  }),
   enviar: (c) => fetch('/api/enviar', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -474,6 +481,20 @@ $('btnConectar').addEventListener('click', () => {
 
 $('btnCerrar').addEventListener('click', () => api.cerrarSesion());
 
+$('btnCodigo').addEventListener('click', async () => {
+  const btn = $('btnCodigo');
+  btn.disabled = true;
+  try {
+    const codigo = await api.pedirCodigo($('telVincular').value);
+    // formato del móvil: XXXX-XXXX
+    $('codigoVincular').textContent = codigo.length === 8 ? codigo.slice(0, 4) + '-' + codigo.slice(4) : codigo;
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 $('btnEnviar').addEventListener('click', async () => {
   if (!conectado) return;
   const validas = citas.filter((c) => c.telefono && c.fecha && c.hora);
@@ -822,6 +843,8 @@ function conectarEventos() {
   $('mensajePlantilla').value = config.mensaje;
   $('chkAutoEnvio').checked = !!config.autoEnvio;
   pintarTabla();
+  // vincular con código: solo el motor Baileys lo admite
+  if (estadoInicial.motor === 'baileys') $('vincularCodigo').classList.remove('oculto');
   if (estadoInicial.version) {
     $('versionTexto').textContent = 'v' + estadoInicial.version;
   }
