@@ -1,0 +1,29 @@
+# Pruebas en cada push y pull request, en Windows (donde están las clínicas) y Linux.
+# Sin red hacia WhatsApp: updater, motor Baileys, servidor con un motor falso y receptor de soporte.
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pruebas:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: '1' # las pruebas no abren Chromium
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: El bundle de Baileys corresponde al package-lock
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run build:baileys && git diff --exit-code vendor/baileys.bundle.mjs
