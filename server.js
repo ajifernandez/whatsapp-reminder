@@ -47,8 +47,10 @@ function leerUltimoErrorDelLog() {
 
 let ultimoError = leerUltimoErrorDelLog(); // sobrevive recargas del navegador y reinicios
 
+let lineasDesdeArranque = 0; // para que el informe lleve todo lo de esta ejecucion
 function registrarLog(tipo, texto) {
   if (tipo === 'error') ultimoError = texto;
+  lineasDesdeArranque++;
   const linea = `[${new Date().toISOString()}] [${tipo}] ${texto}`;
   try {
     if (fs.existsSync(LOG_PATH) && fs.statSync(LOG_PATH).size > LOG_MAX_BYTES) {
@@ -865,12 +867,17 @@ async function informeDiagnostico() {
   let discoLibreMB = null; try { const f = fs.statfsSync(__dirname); discoLibreMB = Math.round((f.bavail * f.bsize) / 1048576); } catch (_) { /* sin statfs */ }
   const [red, proxy, delMotor] = await Promise.all([pruebaRed(), proxyDelSistema(), Motor.diagnostico()]);
   let log = [];
-  try { log = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n').slice(-80); } catch (_) { /* sin log */ }
+  // Todo lo escrito desde que arranco el servidor (y como minimo las ultimas 80 lineas, para tener contexto),
+  // sin pasar de ~200 KB: el receptor admite 256 KB por informe. Si sobra, se quitan las mas antiguas.
+  try { log = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n').slice(-Math.max(80, lineasDesdeArranque)); } catch (_) { /* sin log */ }
+  let omitidas = 0;
+  while (log.length > 80 && Buffer.byteLength(log.join('\n')) > 200 * 1024) { log.shift(); omitidas++; }
+  if (omitidas) log.unshift(`[${omitidas} líneas más antiguas de esta ejecución omitidas por tamaño]`);
   return {
     version: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
-    citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(),
+    citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(), lineasDesdeArranque,
     latido: { activo: Boolean(LATIDO_URL) && leerConfig().latido, id: idInstalacion(), fallando: latidoFalla },
     ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
     redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
