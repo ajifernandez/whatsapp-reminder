@@ -14,6 +14,7 @@ services:
       ADMIN_USER: admin
       ADMIN_PASS: cambia-esto   # contraseña de la interfaz web (GET /); sin ella queda desactivada
       # NTFY_URL: https://ntfy.tudominio/diagnosticos   # opcional: aviso push
+      # OFFLINE_MIN: 12   # minutos sin latidos para marcar una clínica como «Sin señal»
     volumes:
       - soporte-data:/data
 

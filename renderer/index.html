@@ -62,6 +62,10 @@
           <button id="btnConectar" class="btn btn-verde">Conectar WhatsApp</button>
           <button id="btnCerrar" class="btn btn-gris" disabled>Cerrar sesión</button>
         </div>
+        <label class="selector-latido" title="Cada 5 minutos y al cambiar de estado, la aplicación avisa a soporte de cómo está, para poder ayudar sin que tengas que enviar nada. Solo lleva el nombre del equipo, la versión y el estado de la conexión: nunca nombres, teléfonos ni citas.">
+          <input type="checkbox" id="chkLatido" checked />
+          Avisar a soporte del estado de la conexión <span class="auto-envio-nota">(sin datos de pacientes)</span>
+        </label>
         <label class="selector-motor" title="Cómo se conecta la aplicación con WhatsApp. Cada motor tiene su propia vinculación.">
           Motor: <select id="selMotor" class="pequeno"></select>
         </label>

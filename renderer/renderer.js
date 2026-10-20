@@ -697,6 +697,18 @@ $('selVersion').addEventListener('change', async () => {
 
 $('mensajePlantilla').addEventListener('input', guardarMensaje);
 
+// Avisar a soporte del estado de la conexion (sin datos de pacientes)
+$('chkLatido').addEventListener('change', async () => {
+  config.latido = $('chkLatido').checked;
+  try {
+    config = await api.guardarConfig(config);
+    $('chkLatido').checked = config.latido !== false;
+    log(config.latido ? 'La aplicación avisará a soporte de su estado.' : 'La aplicación ya no avisa a soporte de su estado.', 'info');
+  } catch (err) {
+    log('No se pudo guardar la configuración: ' + err.message, 'error');
+  }
+});
+
 $('chkAutoEnvio').addEventListener('change', async () => {
   config.autoEnvio = $('chkAutoEnvio').checked;
   try {
@@ -924,6 +936,7 @@ function conectarEventos() {
   config = configInicial;
   $('mensajePlantilla').value = config.mensaje;
   $('chkAutoEnvio').checked = !!config.autoEnvio;
+  $('chkLatido').checked = config.latido !== false;
   pintarTabla();
   pintarMotores(estadoInicial.motor, estadoInicial.motores || []);
   // motor sin sesión pero con otro motor vinculado: avisar al abrir la página

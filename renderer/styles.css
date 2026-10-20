@@ -120,6 +120,7 @@ main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .qr-nota { font-size: 13px; color: var(--texto-sub); margin: 8px 0 0; }
 .vincular-codigo { margin-top: 12px; }
 .selector-motor { display: block; margin-top: 10px; font-size: 13px; color: var(--texto-sub); }
+.selector-latido { display: block; margin-top: 10px; font-size: 13px; color: var(--texto-sub); cursor: pointer; }
 .vincular-codigo input { padding: 6px 10px; border: 1px solid var(--borde); border-radius: 6px; font-size: 14px; width: 220px; }
 .codigo-vincular { font: 600 28px/1.2 ui-monospace, monospace; letter-spacing: 4px; margin: 10px 0 0; }
 
