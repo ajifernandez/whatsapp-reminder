@@ -593,7 +593,7 @@ $('btnActualizar').addEventListener('click', async () => {
     const r = await api.actualizar();
     if (r.actualizado) toast(`Actualizado a la versión ${r.version}. Cierra y vuelve a abrir la aplicación.`, 'ok');
     else if (r.fijada) toast(`Versión fijada en ${r.version}: no se actualiza sola.`, 'aviso');
-    else if (r.nuevaMayor) toast(`Hay una versión mayor nueva (${r.nuevaMayor}). No se instala sola: elígela en «Versión…».`, 'aviso');
+    else if (r.nuevaMayor) toast(`Hay una versión mayor nueva (${r.nuevaMayor}). No se instala sola: avisa a soporte para instalarla.`, 'aviso');
     else toast(`Ya tienes la última versión (${r.version}).`, 'ok');
   } catch (err) {
     toast('No se pudo actualizar: ' + err.message, 'error');
@@ -911,7 +911,11 @@ function conectarEventos() {
     log('Último error registrado: ' + estadoInicial.ultimoError, 'error');
   }
   conectarEventos();
-  cargarVersiones();
+  // el selector de versión está oculto (ver index.html); solo se marca la versión fijada
+  if (estadoInicial.fijada) {
+    $('versionTexto').textContent = `v${estadoInicial.version} 🔒`;
+    $('versionTexto').title = 'Versión fijada: no se actualiza sola. Para volver a la última, avisa a soporte.';
+  }
 
   // Aviso no intrusivo si hay version nueva (el arranque ya intenta bajarla).
   api.buscarActualizacion()
@@ -920,7 +924,7 @@ function conectarEventos() {
         const v = $('versionTexto');
         v.textContent = `v${info.local} · ${info.nuevaMayor} disponible`;
         v.classList.add('hay-nueva');
-        v.title = 'Versión mayor nueva: no se instala sola. Elige «Última versión» en «Versión…» para instalarla.';
+        v.title = 'Versión mayor nueva: no se instala sola. Avisa a soporte para instalarla.';
       } else if (info.hayActualizacion) {
         const v = $('versionTexto');
         v.textContent = `v${info.local} → ${info.remota} disponible`;

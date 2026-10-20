@@ -96,7 +96,7 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
 ## Versiones mayores, canal beta y ficheros nuevos
 
-- **Freno de versión mayor**: en el canal estable el auto-update solo actúa dentro de la misma versión mayor (2.x → 2.x). Una 3.0 en `main` solo se avisa («versión mayor nueva»); se instala de forma explícita con «Última versión» en el selector de la cabecera o `node update.js latest`.
+- **Freno de versión mayor**: en el canal estable el auto-update solo actúa dentro de la misma versión mayor (2.x → 2.x). Una 3.0 en `main` solo se avisa («versión mayor nueva»); se instala de forma explícita con `node update.js latest`.
 - **Canal beta por clínica**: `node update.js canal v3` hace que esa clínica siga la rama `v3` (sin freno: elegir el canal ya es aceptar la beta). `node update.js canal main` la devuelve a estable. Se guarda en `data/canal.txt` y sale en el diagnóstico (`canal`).
 - **Lista de ficheros remota**: el updater baja los ficheros que indica `archivosActualizables` en el `package.json` **remoto**, así una versión nueva puede añadir ficheros (p. ej. un motor empaquetado en `vendor/`). Rutas relativas sin `..`; si la lista falta o es inválida, usa la lista mínima de `update.js`.
 - **Autorreparación**: al arrancar, `server.js` comprueba que existen todos los ficheros de su `archivosActualizables` y descarga los que falten del tag de su versión. Cubre la primera actualización hecha por un updater ≤ 2.1.16, que solo bajaba su lista fija.
@@ -106,7 +106,7 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
 ## Volver a una versión anterior (downgrade)
 
-Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `vX.Y.Z` de GitHub) y crea `data/version-fija.txt`, que desactiva el auto-update. Para volver a seguir la última: `node update.js latest`. También desde la cabecera de la app: selector «Versión…» (pide confirmación; muestra 🔒 si hay versión fijada). Solo se queda fijada si la versión destino es 2.1.11 o posterior (las anteriores no conocen la fijación y se actualizarían solas). Al publicar una versión nueva: `git tag vX.Y.Z && git push --tags`.
+Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `vX.Y.Z` de GitHub) y crea `data/version-fija.txt`, que desactiva el auto-update. Para volver a seguir la última: `node update.js latest`. El selector «Versión…» de la cabecera está oculto desde la 2.2.1 (no funcionaba bien); la cabecera sigue mostrando 🔒 si hay versión fijada. Solo se queda fijada si la versión destino es 2.1.11 o posterior (las anteriores no conocen la fijación y se actualizarían solas). Al publicar una versión nueva: `git tag vX.Y.Z && git push --tags`.
 
 ## Diagnóstico de problemas de conexión
 
