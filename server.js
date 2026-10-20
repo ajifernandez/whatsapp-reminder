@@ -737,7 +737,8 @@ const sinUsuarioRe = /([A-Za-z]:[\\/]Users[\\/]|\/home\/|\/Users\/)[^\\/\n]+/gi;
 const sinUsuario = (ruta) => (ruta == null ? ruta : String(ruta).replace(sinUsuarioRe, '$1<usuario>'));
 
 // Receptor de diagnosticos (ver soporte-server/). Si falla o esta vacio, la UI cae a descarga + correo.
-const DIAG_URL = process.env.DIAG_URL || 'https://soporte.familia-jimenez.es/diagnostico';
+// Vacio (DIAG_URL=) = desactivado, sin caer en la URL real: asi las pruebas nunca escriben en el servidor de soporte
+const DIAG_URL = process.env.DIAG_URL !== undefined ? process.env.DIAG_URL : 'https://soporte.familia-jimenez.es/diagnostico';
 
 // ---------- Latido hacia soporte: estado de esta instalacion (sin datos de pacientes) ----------
 // Cada INTERVALO_LATIDO_MS y al cambiar de estado, la app avisa a soporte de como esta, para ver en
@@ -776,9 +777,27 @@ async function enviarLatido(estado) {
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     if (latidoFalla) { latidoFalla = false; registrarLog('info', 'Vuelve a llegar a soporte el aviso de estado.'); }
+    // Soporte puede pedir un diagnostico desde su web: llega en la respuesta (la clinica nunca acepta conexiones
+    // entrantes). Solo se hace UNA cosa fija: mandar el informe a nuestro DIAG_URL. Con el aviso de estado
+    // desactivado (casilla) no se llega aqui, asi que nunca se atiende una peticion sin que la clinica participe.
+    const respuesta = estado === 'apagada' ? null : await r.json().catch(() => null);
+    if (respuesta && Number.isFinite(respuesta.diagnostico) && respuesta.diagnostico !== ultimaOrdenAtendida) atenderPeticionDiagnostico(respuesta.diagnostico);
   } catch (err) {
     // sin molestar: una sola linea en el log hasta que vuelva a funcionar
     if (!latidoFalla) { latidoFalla = true; registrarLog('aviso', `No se pudo avisar del estado a soporte (${err.message}); se reintenta sin avisar más.`); }
+  }
+}
+let ultimaOrdenAtendida = null;
+async function atenderPeticionDiagnostico(orden) {
+  if (!DIAG_URL) return;
+  ultimaOrdenAtendida = orden; // evita repetirlo en el siguiente latido mientras llega
+  emitir('log', { tipo: 'info', texto: 'Soporte ha pedido un diagnóstico (sin datos de pacientes): enviándolo...' });
+  try {
+    await enviarDiagnosticoASoporte();
+    emitir('log', { tipo: 'ok', texto: 'Diagnóstico enviado a soporte, a petición suya.' });
+  } catch (err) {
+    ultimaOrdenAtendida = null; // se reintenta en el siguiente latido
+    emitir('log', { tipo: 'aviso', texto: `No se pudo enviar el diagnóstico que pidió soporte (${err.message}); se reintentará.` });
   }
 }
 function programarLatido() { clearTimeout(latidoTimer); latidoTimer = setTimeout(() => enviarLatido(), 3000); } // agrupa cambios seguidos
@@ -835,14 +854,19 @@ async function informeDiagnostico() {
 // Resumen para soporte remoto: abrir http://localhost:PUERTO/api/diagnostico
 app.get('/api/diagnostico', async (_req, res) => res.json(await informeDiagnostico()));
 
+// Manda el informe a DIAG_URL (la de esta aplicacion: nunca una que venga de fuera). Lanza si falla.
+async function enviarDiagnosticoASoporte() {
+  const r = await fetch(DIAG_URL, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(await informeDiagnostico()), signal: AbortSignal.timeout(15000)
+  });
+  if (!r.ok) throw new Error('El servidor respondio ' + r.status);
+}
+
 app.post('/api/enviar-diagnostico', async (_req, res) => {
   if (!DIAG_URL) return res.status(501).json({ error: 'Envio directo no configurado' });
   try {
-    const r = await fetch(DIAG_URL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(await informeDiagnostico()), signal: AbortSignal.timeout(15000)
-    });
-    if (!r.ok) throw new Error('El servidor respondio ' + r.status);
+    await enviarDiagnosticoASoporte();
     emitir('log', { tipo: 'ok', texto: 'Diagnostico enviado a soporte' });
     res.json({ ok: true });
   } catch (err) {

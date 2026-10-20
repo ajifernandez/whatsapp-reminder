@@ -189,7 +189,7 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     throw new Error('el receptor no recibió el latido esperado: ' + JSON.stringify(clinicasEnRecepcion()[0]));
   };
   await pausa(600);
-  s = await arrancar({ env: { LATIDO_URL: `http://localhost:${puertoRec}/latido`, INTERVALO_LATIDO_MS: '300', INTERVALO_SALUD_MS: '150', SALUD_RED: 'ok' } });
+  s = await arrancar({ env: { LATIDO_URL: `http://localhost:${puertoRec}/latido`, DIAG_URL: `http://localhost:${puertoRec}/diagnostico`, INTERVALO_LATIDO_MS: '300', INTERVALO_SALUD_MS: '150', SALUD_RED: 'ok' } });
   try {
     await s.esperarEstado('conectado');
     const c = await esperarClinica((x) => x.estado === 'conectado');
@@ -217,6 +217,35 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     await s.api('/api/config', { latido: true });
     await esperarClinica((x) => x.ultimo > antes);
     ok('latido: se puede desactivar desde la configuración (y reactivar)');
+
+    // soporte pide un diagnostico desde su web: la app lo manda sola en el siguiente latido
+    const adminRec = 'Basic ' + Buffer.from('admin:x').toString('base64');
+    const idApp = clinicasEnRecepcion()[0].id;
+    const informesEnRecepcion = () => fs.readdirSync(dirReceptor).filter((n) => n.endsWith('.json'));
+    const esperarInformes = async (n, ms = 9000) => { for (let t = 0; t < ms && informesEnRecepcion().length < n; t += 100) await pausa(100); return informesEnRecepcion().length; };
+    const pedirDesdeSoporte = () => fetch(`http://localhost:${puertoRec}/clinicas/${idApp}/diagnostico`, { method: 'POST', headers: { Authorization: adminRec } });
+    assert.equal(informesEnRecepcion().length, 0, 'no se ha mandado ningún informe por su cuenta');
+    assert.equal((await pedirDesdeSoporte()).status, 200);
+    assert.equal(await esperarInformes(1), 1, 'la app manda el informe tras la petición');
+    await pausa(1200); // varios latidos más: no se repite
+    assert.equal(informesEnRecepcion().length, 1, 'se atiende una sola vez');
+    const informe = JSON.parse(fs.readFileSync(path.join(dirReceptor, informesEnRecepcion()[0]), 'utf8'));
+    assert.equal(informe.latido.id, idApp, 'el informe lleva el id de la instalación');
+    assert.ok(informe.log.some((l) => l.includes('Soporte ha pedido un diagnóstico')), 'queda anotado en el log de la clínica');
+    const rec = clinicasEnRecepcion()[0];
+    assert.ok(rec.ultimoDiag && !rec.orden, 'el receptor lo da por cumplido');
+    assert.ok((await s.api('/api/diagnostico')).log.some((l) => l.includes('Diagnóstico enviado a soporte, a petición suya')));
+    ok('diagnóstico a petición de soporte: la app lo envía sola en el siguiente latido, una vez, y queda anotado');
+
+    // con el aviso de estado desactivado la clinica no participa: no se atiende ninguna peticion
+    await s.api('/api/config', { latido: false });
+    await pausa(500);
+    assert.equal((await pedirDesdeSoporte()).status, 200);
+    await pausa(1500);
+    assert.equal(informesEnRecepcion().length, 1, 'con «avisar a soporte» desactivado no se manda nada');
+    await s.api('/api/config', { latido: true });
+    assert.equal(await esperarInformes(2), 2, 'al reactivarlo, se atiende la petición pendiente');
+    ok('con el aviso de estado desactivado no se atiende ninguna petición de diagnóstico (y se atiende al reactivarlo)');
 
     // al apagar con el boton, un ultimo aviso: "apagada" (a proposito), no una caida
     const apagar = await fetch(s.base + '/api/apagar', { method: 'POST', headers: { Origin: s.base } });
