@@ -3,6 +3,7 @@
 // receptor real en una carpeta temporal.
 // Uso: npm test
 const { spawn } = require('child_process');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -124,6 +125,47 @@ const dirsTemporales = [];
     assert.match(await r.html('/diagnosticos'), /Diagnósticos recibidos \(0,/);
     assert.ok(!(await r.html('/diagnosticos')).includes('clinicas.json'));
     ok('el estado de las clínicas no aparece en la lista de diagnósticos');
+
+    // --- aviso push (ntfy) al caer y al recuperarse; no se repite en cada latido
+    const avisos = [];
+    const ntfy = http.createServer((req, res) => { let b=''; req.on('data',(c)=>b+=c); req.on('end',()=>{ avisos.push({ titulo: req.headers.title, prioridad: req.headers.priority, cuerpo: b }); res.end('ok'); }); }).listen(0);
+    const puertoNtfy = ntfy.address ? ntfy.address().port : await new Promise((ok) => ntfy.on('listening', () => ok(ntfy.address().port)));
+    const r2 = await arrancar({ env: { NTFY_URL: `http://localhost:${puertoNtfy}/clinicas` } });
+    try {
+      const ID9 = 'a1b2c3d4-0000-4000-8000-000000000009';
+      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'conectado' }));
+      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'desconectado', ultimoError: 'Sesión desconectada' }));
+      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'desconectado', ultimoError: 'Sesión desconectada' }));
+      await pausa(400);
+      const caidas = avisos.filter((a) => a.titulo.startsWith('Desconectado'));
+      assert.equal(caidas.length, 1, 'un solo aviso al caer, no uno por latido');
+      assert.equal(caidas[0].prioridad, 'high');
+      assert.match(caidas[0].titulo, /CLINICA-PUSH/);
+      await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'conectado' }));
+      await pausa(400);
+      const rec = avisos.filter((a) => a.titulo.startsWith('Recuperada'));
+      assert.equal(rec.length, 1, 'aviso de recuperación');
+      assert.equal(rec[0].prioridad, 'low');
+      ok('push: un aviso al caer (prioridad alta), ninguno repetido, y otro al recuperarse');
+    } finally { await r2.parar(); ntfy.close(); }
+
+    // --- historial de transiciones por instalacion
+    await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
+    await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'degradado', causa: 'x' }));
+    await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
+    pagina = await r.html('/clinicas?parcial=1');
+    const filaAviso = pagina.split('<tr>').find((f) => f.includes('CLINICA-AVISO'));
+    assert.match(filaAviso, /historial \(\d+\)/, 'hay desplegable de historial');
+    const items = [...filaAviso.matchAll(/<li>[^<]*· (\w+)<\/li>/g)].map((m) => m[1]);
+    // la más reciente primero: conectado (la última), degradado, conectado (la primera)
+    assert.deepEqual(items.slice(0, 3), ['conectado', 'degradado', 'conectado'], 'orden: más reciente primero');
+    const filaOk = pagina.split('<tr>').find((f) => f.includes('CLINICA-OK'));
+    const idCerrada = 'a1b2c3d4-0000-4000-8000-00000000000b';
+    await r.latido(base(idCerrada, { host: 'CLINICA-SIN-CAMBIOS', estado: 'conectado' }));
+    const filaSinCambios = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-SIN-CAMBIOS'));
+    assert.ok(filaSinCambios.includes('historial (1)'), 'el primer estado cuenta como una transición');
+    assert.ok(filaOk && typeof filaOk === 'string', 'la fila OK existe');
+    ok('historial: cada instalación muestra sus últimas transiciones en un desplegable');
 
     // --- olvidar una instalación
     assert.equal((await r.pedir('/clinicas/' + ID4, { method: 'DELETE', headers: { Origin: 'https://otra-web.example' } })).status, 403);
