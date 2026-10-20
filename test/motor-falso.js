@@ -42,7 +42,8 @@ const falso = {
     m.enviar = async (id, texto) => fs.appendFileSync(ENVIADOS, JSON.stringify({ id, texto }) + '\n');
     m.cerrarSesion = async () => fs.appendFileSync(ENVIADOS, JSON.stringify({ cerrarSesion: true }) + '\n');
     m.descartar = () => { clearInterval(vigilancia); m.removeAllListeners(); };
-    m.apagar = async () => m.descartar();
+    // FALSO_APAGAR_MS: tarda en cerrarse, como Chromium con whatsapp-web.js
+    m.apagar = async () => { await new Promise((r) => setTimeout(r, Number(process.env.FALSO_APAGAR_MS) || 0)); m.descartar(); };
     return m;
   }
 };
