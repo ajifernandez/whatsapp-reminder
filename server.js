@@ -764,13 +764,24 @@ function idInstalacion() {
   return idCache;
 }
 
-// Los latidos salen en fila (nunca dos a la vez): si un periodico «conectado» siguiera en camino al
-// apagar, podria llegar DESPUES del «apagada» y soporte veria la clinica conectada. Y una vez empezado el
-// cierre, solo sale el «apagada».
+// Los latidos nunca van dos a la vez (si un periodico «conectado» siguiera en camino al apagar, podria
+// llegar DESPUES del «apagada» y soporte veria la clinica conectada), y como mucho hay uno en curso y uno
+// pendiente: los que llegan mientras tanto se fusionan con el pendiente, asi nunca se forma cola. «apagada»
+// manda sobre el pendiente; y empezado el cierre, solo sale ese.
 let colaLatidos = Promise.resolve();
+let hayPendiente = false;
+let estadoPendiente;
 function enviarLatido(estado) {
   if (cerrando && estado !== 'apagada') return colaLatidos;
-  colaLatidos = colaLatidos.then(() => enviarLatidoAhora(estado));
+  if (estadoPendiente !== 'apagada') estadoPendiente = estado;
+  if (hayPendiente) return colaLatidos; // fusionado con el que ya espera
+  hayPendiente = true;
+  colaLatidos = colaLatidos.then(() => {
+    hayPendiente = false;
+    const e = estadoPendiente;
+    estadoPendiente = undefined;
+    return enviarLatidoAhora(e);
+  });
   return colaLatidos;
 }
 
