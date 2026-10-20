@@ -21,6 +21,7 @@
       <span id="versionTexto" class="version" title="Versión instalada">v…</span>
       <button id="btnActualizar" class="btn btn-gris pequeno" title="Comprueba si hay una versión nueva del software y la instala">⟳ Comprobar versión</button>
       <button id="btnDiagnostico" class="btn btn-gris pequeno" title="Envía a soporte un informe técnico (sin datos de pacientes). Si no hay conexión, lo descarga y abre el correo">✉ Enviar diagnóstico</button>
+      <button id="btnApagar" class="btn btn-gris pequeno" title="Cierra la aplicación de forma segura (también WhatsApp)">⏻ Apagar</button>
       <select id="selVersion" class="pequeno" title="Instalar una versión anterior" disabled><option value="">Versión…</option></select>
     </div>
   </header>
@@ -52,6 +53,9 @@
           <button id="btnConectar" class="btn btn-verde">Conectar WhatsApp</button>
           <button id="btnCerrar" class="btn btn-gris" disabled>Cerrar sesión</button>
         </div>
+        <label class="selector-motor" title="Cómo se conecta la aplicación con WhatsApp. Cada motor tiene su propia vinculación.">
+          Motor: <select id="selMotor" class="pequeno"></select>
+        </label>
       </div>
       <div id="qrCaja" class="qr-caja oculto">
         <img id="qrImg" alt="Código QR" />

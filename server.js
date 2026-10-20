@@ -10,10 +10,11 @@ const CITAS_PATH = path.join(DATA_DIR, 'citas.json');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const LOG_PATH = path.join(DATA_DIR, 'app.log');
 const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
-// Motor de WhatsApp (motores/*.js). Se elige con "motor" en data/config.json; cambiarlo
-// requiere reiniciar la aplicacion.
-const MOTORES = { wwebjs: './motores/wwebjs', baileys: './motores/baileys' };
-const MOTOR_POR_DEFECTO = 'wwebjs';
+// Motor de WhatsApp (motores/*.js). Se elige con "motor" en data/config.json o desde la
+// pagina (/api/motor). Cada motor tiene su propia sesion: al cambiar hay que vincular.
+const MOTORES = { baileys: './motores/baileys', wwebjs: './motores/wwebjs' };
+const NOMBRES_MOTOR = { baileys: 'Baileys (recomendado)', wwebjs: 'whatsapp-web.js (anterior)' };
+const MOTOR_POR_DEFECTO = 'baileys';
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -107,7 +108,8 @@ function guardarConfig(config) {
   const actual = leerConfig();
   const mensaje = typeof config?.mensaje === 'string' && config.mensaje.trim() ? config.mensaje : actual.mensaje;
   const autoEnvio = typeof config?.autoEnvio === 'boolean' ? config.autoEnvio : actual.autoEnvio;
-  const nuevo = { ...actual, mensaje, autoEnvio };
+  const motor = Object.hasOwn(MOTORES, config?.motor) ? config.motor : actual.motor;
+  const nuevo = { ...actual, mensaje, autoEnvio, motor };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nuevo, null, 2), 'utf8');
   return nuevo;
 }
@@ -189,7 +191,9 @@ function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
 }
 
 // ---------- Cliente WhatsApp (lo propio de cada libreria vive en motores/) ----------
-const Motor = require(MOTORES[leerConfig().motor]);
+let Motor = require(MOTORES[leerConfig().motor]);
+// motores con su sesion: para el selector de la pagina y el aviso de revincular
+const listaMotores = () => Object.keys(MOTORES).map((id) => ({ id, nombre: NOMBRES_MOTOR[id], vinculado: require(MOTORES[id]).sesionGuardada() }));
 // log del motor: ui=true tambien lo muestra en la pagina
 const logMotor = (tipo, texto, ui = false) => (ui ? emitir('log', { tipo, texto }) : registrarLog(tipo, texto));
 
@@ -530,7 +534,30 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre }));
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores() }));
+
+// Cambio de motor desde la pagina: corta la conexion actual (cada motor tiene su sesion)
+// y, si el nuevo ya esta vinculado, conecta con el.
+app.post('/api/motor', (req, res) => {
+  const id = String((req.body || {}).motor || '');
+  if (!Object.hasOwn(MOTORES, id)) return res.status(400).json({ error: 'Motor desconocido' });
+  if (client) {
+    pararTemporizadorConexion();
+    client.descartar();
+    client = null;
+  }
+  conectando = false;
+  clientReady = false;
+  Motor = require(MOTORES[id]);
+  guardarConfig({ motor: id });
+  emitir('estado', 'desconectado');
+  emitir('log', { tipo: 'info', texto: `Motor cambiado a ${NOMBRES_MOTOR[id]}.` + (Motor.sesionGuardada() ? ' Conectando con su sesión guardada...' : ' Pulsa «Conectar WhatsApp» y vincula el móvil.') });
+  if (Motor.sesionGuardada()) {
+    ultimoIntentoConexion = 0; // cambio explicito: sin esperar el cooldown
+    iniciarSesion();
+  }
+  res.json({ motor: id, motores: listaMotores() });
+});
 
 // El log lleva nombres y telefonos de pacientes: se quitan antes de sacarlo del equipo.
 function anonimizar(linea) {
@@ -630,6 +657,17 @@ app.post('/api/vincular-codigo', async (req, res) => {
   }
 });
 
+// Cierre controlado desde la página (el mismo que Ctrl+C). Solo desde la propia
+// página: cualquier web abierta en el PC podría mandar este POST a localhost.
+app.post('/api/apagar', (req, res) => {
+  const origen = req.headers.origin;
+  let propio = true;
+  try { propio = !origen || new URL(origen).host === req.headers.host; } catch (_) { propio = false; }
+  if (!propio) return res.status(403).json({ error: 'Origen no permitido' });
+  res.json({ ok: true });
+  setTimeout(() => apagar('botón Apagar de la página'), 100); // que la respuesta llegue antes
+});
+
 app.post('/api/cerrar', async (_req, res) => { await cerrarSesion(); res.json({ ok: true }); });
 
 app.post('/api/enviar', async (req, res) => {
@@ -726,6 +764,10 @@ const server = app.listen(PORT, () => {
   if (Motor.sesionGuardada()) {
     registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
     iniciarSesion();
+  } else {
+    // p. ej. al pasar a la 3.0: la sesión del motor anterior no sirve para este
+    const otro = listaMotores().find((m) => m.vinculado);
+    if (otro) emitir('log', { tipo: 'aviso', texto: `Esta versión usa ${NOMBRES_MOTOR[Motor.nombre]}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»; QR o código). Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».` });
   }
 });
 
@@ -743,6 +785,8 @@ async function apagar(motivo) {
   if (cerrando) return;
   cerrando = true;
   console.log(`\nCerrando de forma segura (${motivo})...`);
+  registrarLog('info', `Aplicación cerrada (${motivo}).`);
+  setTimeout(() => process.exit(0), 10000).unref(); // si algo se cuelga al cerrar, se sale igual
 
   // cerrar conexiones SSE abiertas
   for (const res of sseClients) {
