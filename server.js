@@ -764,7 +764,17 @@ function idInstalacion() {
   return idCache;
 }
 
-async function enviarLatido(estado) {
+// Los latidos salen en fila (nunca dos a la vez): si un periodico «conectado» siguiera en camino al
+// apagar, podria llegar DESPUES del «apagada» y soporte veria la clinica conectada. Y una vez empezado el
+// cierre, solo sale el «apagada».
+let colaLatidos = Promise.resolve();
+function enviarLatido(estado) {
+  if (cerrando && estado !== 'apagada') return colaLatidos;
+  colaLatidos = colaLatidos.then(() => enviarLatidoAhora(estado));
+  return colaLatidos;
+}
+
+async function enviarLatidoAhora(estado) {
   if (!LATIDO_URL || !leerConfig().latido) return;
   try {
     const r = await fetch(LATIDO_URL, {
@@ -1042,7 +1052,7 @@ async function apagar(motivo) {
   if (cerrando) return;
   cerrando = true;
   cerrarIncidente('aplicación cerrada'); // sin emitir: la pagina se cierra
-  await Promise.race([enviarLatido('apagada'), pausa(2500)]); // soporte sabe que fue a proposito, no una caida
+  await Promise.race([enviarLatido('apagada'), pausa(4000)]); // soporte sabe que fue a proposito, no una caida
   console.log(`\nCerrando de forma segura (${motivo})...`);
   registrarLog('info', `Aplicación cerrada (${motivo}).`);
   setTimeout(() => process.exit(0), 10000).unref(); // si algo se cuelga al cerrar, se sale igual

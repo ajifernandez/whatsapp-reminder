@@ -277,7 +277,32 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     await s.salida;
     assert.equal(clinicasEnRecepcion()[0].estado, 'apagada');
     ok('latido: al apagar con «Apagar» llega un último aviso «apagada»');
-  } finally { await s.cerrar(); receptor.kill(); await pausa(200); fs.rmSync(dirReceptor, { recursive: true, force: true }); }
+  } finally { await s.cerrar(); }
+
+  // carrera al apagar: tras mandar «apagada» la app sigue cerrando (con whatsapp-web.js, Chromium tarda
+  // hasta 5 s; aqui el motor falso tarda 800 ms) y el latido periodico seguia saliendo con «conectado»,
+  // que llegaba el ultimo (paso en la CI de Windows). El ultimo en llegar tiene que ser «apagada».
+  for (let vuelta = 1; vuelta <= 3; vuelta++) {
+    s = await arrancar({ env: { LATIDO_URL: `http://localhost:${puertoRec}/latido`, INTERVALO_LATIDO_MS: '20', FALSO_APAGAR_MS: '800' } });
+    try {
+      await s.esperarEstado('conectado');
+      // esta instalacion (cada vuelta es una nueva, con su propio id)
+      const rutaId = path.join(s.dir, 'data', 'instalacion.json');
+      for (let t = 0; t < 9000 && !fs.existsSync(rutaId); t += 50) await pausa(50);
+      const idEsta = JSON.parse(fs.readFileSync(rutaId, 'utf8')).id;
+      const enRecepcion = () => { try { return JSON.parse(fs.readFileSync(path.join(dirReceptor, 'estado', 'clinicas.json'), 'utf8'))[idEsta]; } catch (_) { return null; } };
+      for (let t = 0; t < 9000 && !(enRecepcion() && enRecepcion().estado === 'conectado'); t += 50) await pausa(50);
+      assert.equal(enRecepcion().estado, 'conectado');
+      await pausa(300);
+      assert.equal((await fetch(s.base + '/api/apagar', { method: 'POST', headers: { Origin: s.base } })).status, 200);
+      await s.salida;
+      await pausa(300); // por si quedara algo en camino
+      const final = JSON.parse(fs.readFileSync(path.join(dirReceptor, 'estado', 'clinicas.json'), 'utf8'))[idEsta];
+      assert.equal(final.estado, 'apagada', `vuelta ${vuelta}: el último latido debe ser «apagada»`);
+    } finally { await s.cerrar(); }
+  }
+  ok('latido: al apagar con latidos en camino, el último en llegar siempre es «apagada» (3 vueltas)');
+  receptor.kill(); await pausa(200); fs.rmSync(dirReceptor, { recursive: true, force: true });
 
   // envio automatico: cita en las proximas horas con WhatsApp sin responder -> sin marcar y en pausa
   s = await arrancar({ env: { INTERVALO_AUTO_MS: '200' } });
