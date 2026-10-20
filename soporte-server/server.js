@@ -21,6 +21,7 @@ const MAX_FICHEROS = 1000;
 const OFFLINE_MS = (Number(process.env.OFFLINE_MIN) || 12) * 60000; // sin latidos (llegan cada 5 min) = sin señal
 const CONECTANDO_MAX_MS = 10 * 60000; // 'conectando' durante mas de esto ya es un problema
 const MAX_CLINICAS = 500;
+const REFRESCO_S = Number(process.env.REFRESCO_S) || 5; // cada cuantos segundos se actualiza la pagina de clinicas
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 // Estado de las clinicas: en una subcarpeta, para que no se mezcle con los informes (que son *.json de DATA_DIR)
@@ -174,7 +175,8 @@ function registrarLatido(l, ip) {
   return true;
 }
 
-function paginaClinicas() {
+// Solo lo que cambia (resumen y tabla): la pagina lo pide cada pocos segundos y lo sustituye
+function contenidoClinicas() {
   const ahora = Date.now();
   const filas = Object.values(clinicas)
     .map((c) => ({ c, v: estadoVisible(c, ahora) }))
@@ -191,10 +193,15 @@ function paginaClinicas() {
 <td>${esc(hace(ahora - c.ultimo))}</td>
 <td>${esc(c.desdeEstado ? hace(ahora - c.desdeEstado) : '')}</td>
 <td><small>${esc(c.ip)}</small></td></tr>`);
-  return plantilla('Clínicas', 'clinicas', `<h1>Clínicas (${filas.length})</h1>
+  return `<h1>Clínicas (${filas.length})</h1>
 <p class="resumen">${resumen || 'Aún no ha llegado ningún latido.'}</p>
 <table><tr><th>Estado</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=7>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
-<p><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos. Se actualiza sola cada 30 s.</small></p>`, `
+<p><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos.</small></p>`;
+}
+
+function paginaClinicas() {
+  return plantilla('Clínicas', 'clinicas', `<div id="contenido">${contenidoClinicas()}</div>
+<p><small id="actualizado">Se actualiza sola cada ${REFRESCO_S} s.</small></p>`, `
 <script>
 document.addEventListener('click', async (e) => {
   const d = e.target.dataset || {};
@@ -209,9 +216,27 @@ document.addEventListener('click', async (e) => {
     if (!confirm('¿Olvidar esta instalación? Volverá a aparecer si sigue mandando latidos.')) return;
     r = await fetch('/clinicas/' + d.olvidar, { method: 'DELETE' });
   }
-  if (r.ok) location.reload(); else alert('No se pudo (' + r.status + ')');
+  if (r.ok) refrescar(); else alert('No se pudo (' + r.status + ')');
 });
-setTimeout(() => location.reload(), 30000);
+
+// Actualizacion en vivo: pide solo la tabla cada pocos segundos y la sustituye (sin perder el scroll).
+// En segundo plano no pide nada, y al volver a la pestaña se actualiza al momento.
+let fallos = 0;
+async function refrescar() {
+  if (document.hidden) return;
+  try {
+    const r = await fetch('/clinicas?parcial=1', { cache: 'no-store' });
+    if (r.status === 401) { document.getElementById('actualizado').textContent = 'La sesión ha caducado: recarga la página.'; return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    document.getElementById('contenido').innerHTML = await r.text();
+    fallos = 0;
+    document.getElementById('actualizado').textContent = 'Actualizado a las ' + new Date().toLocaleTimeString('es-ES') + ' · se actualiza sola cada ${REFRESCO_S} s.';
+  } catch (e) {
+    if (++fallos >= 2) document.getElementById('actualizado').textContent = 'No se puede contactar con el servidor de soporte (¿sin conexión?). Se sigue intentando.';
+  }
+}
+setInterval(refrescar, ${REFRESCO_S * 1000});
+document.addEventListener('visibilitychange', refrescar);
 </script>`);
 }
 
@@ -247,6 +272,7 @@ http.createServer((req, res) => {
   if (req.method === 'GET' && (url.pathname === '/clinicas' || url.pathname === '/diagnosticos')) {
     if (!autorizar(req, res)) return;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    if (url.pathname === '/clinicas' && url.searchParams.has('parcial')) return res.end(contenidoClinicas());
     return res.end(url.pathname === '/clinicas' ? paginaClinicas() : paginaListado());
   }
   if (req.method === 'POST' && url.pathname === '/latido') {

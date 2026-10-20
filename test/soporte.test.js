@@ -84,6 +84,20 @@ const dirsTemporales = [];
     assert.ok(pagina.indexOf('CLINICA-AVISO') < pagina.indexOf('CLINICA-OK'), 'sin señal va antes que OK');
     ok('sin latidos -> «Sin señal» (menos las apagadas a propósito), por delante de las que están bien');
 
+    // --- actualización en vivo: la página pide solo el contenido, sin recargarse entera
+    assert.equal((await fetch(r.base + '/clinicas?parcial=1')).status, 401, 'la versión parcial también pide contraseña');
+    const parcial = await r.html('/clinicas?parcial=1');
+    assert.ok(!parcial.includes('<nav') && !parcial.includes('<!doctype') && !parcial.includes('<script'), 'solo el contenido, sin la página');
+    assert.match(parcial, /CLINICA-OK/);
+    const entera = await r.html('/clinicas');
+    assert.match(entera, /id="contenido"/);
+    assert.match(entera, /\/clinicas\?parcial=1/, 'la página sabe a dónde pedir el contenido');
+    assert.match(entera, /setInterval\(refrescar, 5000\)/, 'cada 5 s por defecto');
+    assert.ok(!entera.includes('location.reload'), 'ni al renombrar ni periódicamente: actualiza solo la tabla');
+    await r.latido(base(ID5, { host: 'CLINICA-NUEVA', estado: 'conectado' }));
+    assert.match(await r.html('/clinicas?parcial=1'), /CLINICA-NUEVA/, 'un latido nuevo aparece en la siguiente petición');
+    ok('actualización en vivo: la versión parcial (con contraseña) trae solo el contenido y refleja los latidos nuevos');
+
     // --- alias, y solo desde la propia página con contraseña
     const cambiar = (alias, cab = {}) => r.pedir('/clinicas/' + ID1, { method: 'POST', headers: { 'Content-Type': 'application/json', ...cab }, body: JSON.stringify({ alias }) });
     assert.equal((await cambiar('Clínica Centro', { Origin: 'https://otra-web.example' })).status, 403);
