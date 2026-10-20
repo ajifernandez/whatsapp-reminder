@@ -21,6 +21,7 @@ const MAX_FICHEROS = 1000;
 const OFFLINE_MS = (Number(process.env.OFFLINE_MIN) || 12) * 60000; // sin latidos (llegan cada 5 min) = sin señal
 const CONECTANDO_MAX_MS = 10 * 60000; // 'conectando' durante mas de esto ya es un problema
 const MAX_CLINICAS = 500;
+const ORDEN_MAX_MS = 24 * 3600e3; // una peticion de diagnostico sin atender caduca al dia
 const REFRESCO_S = Number(process.env.REFRESCO_S) || 5; // cada cuantos segundos se actualiza la pagina de clinicas
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -237,6 +238,17 @@ function registrarLatido(l, ip) {
   return true;
 }
 
+// «pedir diagnostico» / peticion pendiente / enlace al ultimo recibido
+function diagnosticoHtml(c, v, ahora) {
+  const pendiente = c.orden && ahora - c.orden.t < ORDEN_MAX_MS;
+  const espera = ['offline', 'apagada'].includes(v) ? 'cuando la aplicación vuelva a dar señal' : 'en el próximo latido (como mucho 5 min)';
+  const accion = pendiente
+    ? `<br><small>⏳ diagnóstico pedido ${esc(hace(ahora - c.orden.t))}: llegará ${espera}</small>`
+    : `<br><a href="#" class="accion" style="margin-left:0" data-pedir="${esc(c.id)}">pedir diagnóstico</a>`;
+  const ultimo = c.ultimoDiag ? `<br><small>último diagnóstico: <a href="/f/${encodeURIComponent(c.ultimoDiag.archivo)}">${esc(hace(ahora - c.ultimoDiag.t))}</a></small>` : '';
+  return accion + ultimo;
+}
+
 // Historial de transiciones (las ultimas 20) en un desplegable de la fila
 function historialHtml(c) {
   if (!c.cambios || !c.cambios.length) return '';
@@ -256,7 +268,8 @@ function contenidoClinicas() {
   const html = filas.map(({ c, v }) => `<tr>
 <td><span class="chip ${v}">${esc(ETIQUETA[v])}</span></td>
 <td><b>${esc(c.alias || c.host || 'sin nombre')}</b>${c.alias ? `<br><small>${esc(c.host)}</small>` : ''}<br><small title="${esc(c.id)}">${esc(c.id.slice(0, 8))}</small>
-<a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}">olvidar</a></td>
+<a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}">olvidar</a>
+${diagnosticoHtml(c, v, ahora)}</td>
 <td>${esc(detalle(c, v, ahora))}</td>
 <td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
 <td>${esc(hace(ahora - c.ultimo))}</td>
@@ -275,10 +288,12 @@ function paginaClinicas() {
 <script>
 document.addEventListener('click', async (e) => {
   const d = e.target.dataset || {};
-  if (!d.renombrar && !d.olvidar) return;
+  if (!d.renombrar && !d.olvidar && !d.pedir) return;
   e.preventDefault();
   let r;
-  if (d.renombrar) {
+  if (d.pedir) {
+    r = await fetch('/clinicas/' + d.pedir + '/diagnostico', { method: 'POST' });
+  } else if (d.renombrar) {
     const alias = prompt('Nombre para esta clínica (vacío = usar el del equipo):', d.alias);
     if (alias === null) return;
     r = await fetch('/clinicas/' + d.renombrar, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias }) });
@@ -352,8 +367,22 @@ http.createServer((req, res) => {
       if (!l) return responder(res, 400, 'formato invalido');
       if (limitar(visitasLatido, 'id:' + l.id, 40)) return responder(res, 429, 'demasiados latidos');
       if (!registrarLatido(l, ipDe(req))) return responder(res, 429, 'limite de instalaciones');
-      responder(res, 200, 'ok');
+      // La respuesta lleva la peticion de diagnostico pendiente (si la hay): la clinica no acepta conexiones entrantes.
+      const c = clinicas[l.id];
+      if (c.orden && Date.now() - c.orden.t >= ORDEN_MAX_MS) { delete c.orden; guardarClinicas(); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, diagnostico: c.orden ? c.orden.id : null }));
     });
+  }
+  const mp = req.method === 'POST' && url.pathname.match(/^\/clinicas\/([a-f0-9-]{16,40})\/diagnostico$/);
+  if (mp) {
+    if (!origenPropio(req)) return responder(res, 403, 'origen no permitido');
+    if (!autorizar(req, res)) return;
+    const c = clinicas[mp[1]];
+    if (!c) return responder(res, 404, 'no');
+    if (!c.orden || Date.now() - c.orden.t >= ORDEN_MAX_MS) c.orden = { id: Date.now(), t: Date.now() }; // una pendiente basta
+    guardarClinicas();
+    return responder(res, 200, 'ok');
   }
   const mc = (req.method === 'POST' || req.method === 'DELETE') && url.pathname.match(/^\/clinicas\/([a-f0-9-]{16,40})$/);
   if (mc) {
@@ -411,6 +440,13 @@ http.createServer((req, res) => {
     fs.writeFileSync(path.join(DATA_DIR, nombre), JSON.stringify({ ...d, _ip: ip }, null, 2));
     podar();
     console.log('recibido', nombre);
+    // El informe lleva el id de la instalacion: se enlaza a su fila y cumple la peticion pendiente
+    const idInst = d.latido && typeof d.latido.id === 'string' ? d.latido.id : null;
+    if (idInst && clinicas[idInst]) {
+      clinicas[idInst].ultimoDiag = { archivo: nombre, t: Date.now() };
+      delete clinicas[idInst].orden;
+      guardarClinicas();
+    }
 
     if (NTFY_URL) {
       fetch(NTFY_URL, {

@@ -125,6 +125,37 @@ const dirsTemporales = [];
     assert.ok(!(await r.html('/diagnosticos')).includes('clinicas.json'));
     ok('el estado de las clínicas no aparece en la lista de diagnósticos');
 
+    // --- pedir diagnóstico desde la web: la petición viaja en la respuesta del latido
+    const pedir = (id, cab = {}) => r.pedir('/clinicas/' + id + '/diagnostico', { method: 'POST', headers: cab });
+    assert.match(await r.html('/clinicas?parcial=1'), /data-pedir="a1b2c3d4-0000-4000-8000-000000000001"/, 'botón «pedir diagnóstico»');
+    assert.equal((await pedir(ID1, { Origin: 'https://otra-web.example' })).status, 403, 'otra web no puede pedir diagnósticos');
+    assert.equal((await fetch(r.base + '/clinicas/' + ID1 + '/diagnostico', { method: 'POST' })).status, 401, 'sin contraseña no');
+    assert.equal((await pedir('a1b2c3d4-ffff-4000-8000-00000000ffff')).status, 404, 'instalación desconocida');
+    let resp = await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json();
+    assert.deepEqual(resp, { ok: true, diagnostico: null }, 'sin petición: el latido responde sin orden');
+    assert.equal((await pedir(ID1, { Origin: r.base })).status, 200);
+    const orden = (await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico;
+    assert.ok(Number.isFinite(orden), 'el siguiente latido trae la orden');
+    assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, orden, 'sigue pendiente (misma orden) hasta que llegue el informe');
+    assert.equal((await (await r.latido(base(ID2, { host: 'CLINICA-AVISO' }))).json()).diagnostico, null, 'las demás no reciben la orden');
+    await pedir(ID1);
+    assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, orden, 'pedir otra vez no duplica: sigue la misma orden');
+    let fila = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-OK'));
+    assert.match(fila, /diagnóstico pedido/); assert.ok(!fila.includes('data-pedir'), 'pendiente: sin botón');
+    assert.match(fila, /en el próximo latido/);
+    // llega el informe (con el id de la instalación): cumple la petición y se enlaza a la fila
+    const informe = { version: '2.5.0', estado: 'conectado', log: [], latido: { id: ID1 } };
+    assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ ...informe, host: 'CLINICA-OK' }) })).status, 200);
+    assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, null, 'cumplida: ya no se pide');
+    fila = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-OK'));
+    const enlace = /último diagnóstico: <a href="\/f\/([^"]+)">/.exec(fila);
+    assert.ok(enlace, 'enlace al último diagnóstico'); assert.match(fila, /data-pedir/, 'vuelve el botón');
+    assert.equal((await r.pedir('/f/' + enlace[1])).status, 200, 'el enlace abre el informe');
+    // un informe de una instalación desconocida o sin id no rompe nada
+    assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ version: '2.5.0', log: [], latido: { id: 'a1b2c3d4-ffff-4000-8000-00000000ffff' } }) })).status, 200);
+    assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ version: '2.5.0', log: [] }) })).status, 200);
+    ok('pedir diagnóstico: botón, solo con contraseña y origen propio, orden única en el latido, se cumple al llegar el informe y se enlaza');
+
     // --- historial de transiciones por instalacion
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'degradado', causa: 'x' }));
@@ -207,6 +238,21 @@ const dirsTemporales = [];
     assert.ok(d.warning >= 500 && d.warning < 1500, 'con problemas ≈ 600 ms: ' + d.warning);
     assert.ok(d.offline >= 1000 && d.offline < 2500, 'el hueco más allá de 1,2 s cuenta como sin señal: ' + d.offline);
     ok('disponibilidad: el tiempo entre latidos se atribuye al estado anterior y el hueco largo cuenta como sin señal');
+  } finally { await r.parar(); }
+
+  // --- una petición de diagnóstico sin atender caduca al día
+  const dirOrden = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-orden-'));
+  dirsTemporales.push(dirOrden);
+  fs.mkdirSync(path.join(dirOrden, 'estado'), { recursive: true });
+  fs.writeFileSync(path.join(dirOrden, 'estado', 'clinicas.json'), JSON.stringify({
+    [ID1]: { id: ID1, alias: null, host: 'VIEJA', estado: 'conectado', ultimo: Date.now(), cambios: [], orden: { id: 1, t: Date.now() - 25 * 3600e3 } },
+    [ID2]: { id: ID2, alias: null, host: 'RECIENTE', estado: 'conectado', ultimo: Date.now(), cambios: [], orden: { id: 2, t: Date.now() - 3600e3 } }
+  }));
+  r = await arrancar({ dir: dirOrden });
+  try {
+    assert.equal((await (await r.latido(base(ID1, { host: 'VIEJA' }))).json()).diagnostico, null, 'una petición de hace 25 h ha caducado');
+    assert.equal((await (await r.latido(base(ID2, { host: 'RECIENTE' }))).json()).diagnostico, 2, 'una de hace 1 h sigue vigente');
+    ok('las peticiones de diagnóstico sin atender caducan a las 24 h');
   } finally { await r.parar(); }
 
   // --- límite por instalación (40 latidos/hora)
