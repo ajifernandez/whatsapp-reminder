@@ -108,6 +108,18 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 
 Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `vX.Y.Z` de GitHub) y crea `data/version-fija.txt`, que desactiva el auto-update. Para volver a seguir la última: `node update.js latest`. El selector «Versión…» de la cabecera está oculto desde la 2.2.1 (no funcionaba bien); la cabecera sigue mostrando 🔒 si hay versión fijada. Solo se queda fijada si la versión destino es 2.1.11 o posterior (las anteriores no conocen la fijación y se actualizarían solas). Al publicar una versión nueva: `git tag vX.Y.Z && git push --tags`.
 
+## Estado de la conexión (comprobación automática)
+
+«Conectado» solo dice que la conexión se estableció una vez. Cada minuto el servidor hace una consulta real a WhatsApp (`ping()` del motor: el ping de protocolo en Baileys; `getState()` evaluado dentro de la página en whatsapp-web.js, que detecta la página colgada). Si falla 2 veces seguidas (~2 min), el estado pasa a **«Conectado, con problemas»** (punto ámbar, aviso con la hora, la causa y qué hacer, toast y línea en el registro); al recuperarse vuelve a «Conectado».
+
+La causa se averigua con dos comprobaciones de red desde Node: `web.whatsapp.com` y `www.cloudflare.com/cdn-cgi/trace` (solo para saber si hay internet):
+
+- ninguna responde → sin internet (o cortafuegos/proxy);
+- solo falla WhatsApp → WhatsApp inaccesible (caída o bloqueo del antivirus/cortafuegos);
+- responden las dos → la red va bien pero el motor no responde (probable página colgada: «⏻ Apagar» y abrir de nuevo, o cambiar de motor).
+
+No bloquea nada: se puede seguir enviando (los envíos que no reciban respuesta quedan sin marcar). El estado sale en `/api/estado` y en el diagnóstico (`salud`). Para pruebas: `INTERVALO_SALUD_MS` y `SALUD_RED=ok|wa|nada`.
+
 ## Diagnóstico de problemas de conexión
 
 Con la app abierta, visitar `http://localhost:PUERTO/api/diagnostico` (mismo puerto que la app). Devuelve versión, estado, último error, SO/Node, RAM libre, si hay sesión vinculada, locks de Chromium y las últimas 80 líneas del log. El botón «✉ Enviar diagnóstico» de la cabecera lo envía desde el servidor al receptor de soporte (`soporte-server/`, ver su `compose.yaml` para Dockge; la interfaz web `/` lista los informes con usuario `ADMIN_USER` y contraseña `ADMIN_PASS`; la URL va en `DIAG_URL` de `server.js`). Si no hay receptor configurado o falla (sin internet), descarga el informe `.json` y abre el correo para adjuntarlo a mano. El log se anonimiza antes: nombres y teléfonos de pacientes salen como `[nombre]` y `[tel]` (función `anonimizar` en `server.js`; si se añaden logs con datos personales, revisarla).

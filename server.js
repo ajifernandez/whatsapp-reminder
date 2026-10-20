@@ -222,6 +222,7 @@ function crearCliente() {
     pararTemporizadorConexion();
     conectando = false;
     clientReady = true;
+    reiniciarSalud();
     ultimoError = null; // la conexión funcionó: el error anterior ya no aplica
     emitir('estado', 'conectado');
     emitir('log', { tipo: 'ok', texto: 'WhatsApp conectado y listo.' });
@@ -263,7 +264,7 @@ function pararTemporizadorConexion() {
 // intento en marcha, aunque clientReady siga en false (evita que la página
 // recién cargada muestre "Desconectado" y habilite el botón durante el intento)
 function estadoActual() {
-  if (clientReady) return 'conectado';
+  if (clientReady) return salud.degradada ? 'degradado' : 'conectado';
   if (conectando) return 'conectando';
   return 'desconectado';
 }
@@ -338,6 +339,76 @@ async function cerrarSesion() {
 }
 
 const pausa = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
+
+// ---------- Salud de la conexión ----------
+// 'Conectado' solo dice que la conexion se establecio una vez. Cada INTERVALO_SALUD_MS se hace
+// una consulta real (motor.ping): si falla FALLOS_PARA_AVISAR veces seguidas, el estado pasa a
+// 'degradado' (aviso visible, con la causa y que hacer) y vuelve a 'conectado' al recuperarse.
+const INTERVALO_SALUD_MS = Number(process.env.INTERVALO_SALUD_MS) || 60 * 1000; // variable: solo para pruebas
+const FALLOS_PARA_AVISAR = 2;
+const salud = { degradada: false, fallosSeguidos: 0, ultimoOk: null, desde: null, causa: null, consejo: null };
+let comprobandoSalud = false;
+
+function reiniciarSalud() {
+  Object.assign(salud, { degradada: false, fallosSeguidos: 0, ultimoOk: Date.now(), desde: null, causa: null, consejo: null });
+}
+const datosSalud = () => ({ degradada: salud.degradada, fallosSeguidos: salud.fallosSeguidos, ultimoOk: salud.ultimoOk, desde: salud.desde, causa: salud.causa, consejo: salud.consejo });
+
+// ¿Responde ese servidor? (cualquier respuesta HTTP cuenta; solo importa llegar)
+async function alcanzable(url) {
+  try { await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(8000) }); return true; } catch (_) { return false; }
+}
+
+// Por que falla: distingue sin internet / WhatsApp inaccesible / motor colgado con la red bien.
+// SALUD_RED (nada|wa|ok) fuerza el resultado: solo para pruebas.
+async function clasificarCausa(motivo) {
+  let wa, neutra;
+  const forzado = process.env.SALUD_RED;
+  if (forzado) { wa = forzado === 'ok'; neutra = forzado !== 'nada'; }
+  else [wa, neutra] = await Promise.all([alcanzable('https://web.whatsapp.com/'), alcanzable('https://www.cloudflare.com/cdn-cgi/trace')]);
+  if (!wa && !neutra) return { causa: 'Sin internet (o un cortafuegos/proxy lo bloquea)', consejo: 'Comprueba la conexión a internet del equipo. Se recuperará sola al volver.' };
+  if (!wa) return { causa: 'WhatsApp no es accesible desde este equipo (caída de WhatsApp o de su red, o bloqueo del antivirus/cortafuegos)', consejo: 'Si el resto de internet funciona, suele ser una caída de WhatsApp y se recupera sola.' };
+  return { causa: `La red funciona pero WhatsApp no responde (${motivo})`, consejo: 'Cierra la aplicación con «⏻ Apagar» y ábrela de nuevo. Si se repite, cambia de motor en «Motor».' };
+}
+
+async function comprobarSalud() {
+  if (!clientReady || !client || comprobandoSalud) return;
+  comprobandoSalud = true;
+  const c = client;
+  const vigente = () => c === client && clientReady;
+  try {
+    await c.ping();
+    if (!vigente()) return;
+    salud.fallosSeguidos = 0;
+    salud.ultimoOk = Date.now();
+    if (salud.degradada) {
+      const minutos = Math.max(1, Math.round((Date.now() - salud.desde) / 60000));
+      salud.degradada = false; salud.desde = null; salud.causa = null; salud.consejo = null;
+      emitir('log', { tipo: 'ok', texto: `Conexión con WhatsApp recuperada (llevaba ~${minutos} min con problemas).` });
+      emitir('estado', 'conectado');
+      emitir('salud', datosSalud());
+    }
+  } catch (err) {
+    if (!vigente()) return;
+    salud.fallosSeguidos++;
+    const motivo = err.motivo || (err.sinRespuesta ? 'no contesta' : err.message);
+    // la primera vez (y cada 5 fallos seguidos) se vuelve a averiguar la causa
+    if (salud.fallosSeguidos >= FALLOS_PARA_AVISAR && (!salud.degradada || salud.fallosSeguidos % 5 === 0)) {
+      const { causa, consejo } = await clasificarCausa(motivo);
+      if (!vigente()) return;
+      const nueva = !salud.degradada;
+      if (nueva) salud.desde = Date.now();
+      const cambio = nueva || salud.causa !== causa;
+      Object.assign(salud, { degradada: true, causa, consejo });
+      if (cambio) emitir('log', { tipo: 'aviso', texto: `Conexión con WhatsApp con problemas: ${causa}. Los envíos pueden fallar; se sigue comprobando.` });
+      if (nueva) emitir('estado', 'degradado');
+      emitir('salud', datosSalud());
+    }
+  } finally {
+    comprobandoSalud = false;
+  }
+}
+setInterval(comprobarSalud, INTERVALO_SALUD_MS);
 
 const PAUSA_LARGA_CADA = 20; // envíos entre cada pausa larga
 const PAUSA_LARGA_MS = 30 * 1000; // duración de la pausa larga
@@ -549,6 +620,7 @@ app.get('/api/events', (req, res) => {
   sseClients.add(res);
   // estado actual al conectar
   res.write(`event: estado\ndata: ${JSON.stringify(estadoActual())}\n\n`);
+  res.write(`event: salud\ndata: ${JSON.stringify(datosSalud())}\n\n`);
   req.on('close', () => sseClients.delete(res));
 });
 
@@ -566,7 +638,7 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores() }));
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores(), salud: datosSalud() }));
 
 // Cambio de motor desde la pagina: corta la conexion actual (cada motor tiene su sesion)
 // y, si el nuevo ya esta vinculado, conecta con el.
@@ -647,7 +719,7 @@ async function informeDiagnostico() {
     version: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
-    citas: leerCitas().length, motor: Motor.nombre,
+    citas: leerCitas().length, motor: Motor.nombre, salud: datosSalud(),
     ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
     redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
     log: log.map(anonimizar)

@@ -439,10 +439,35 @@ function iniciarTemporizadorConectando() {
   temporizadorConectando = setInterval(actualizar, 1000);
 }
 
+// 'degradado' = conectado pero con problemas: se puede seguir usando
+const operativo = (estado) => estado === 'conectado' || estado === 'degradado';
+
+// Aviso de salud de la conexion (viene del servidor, que comprueba cada minuto)
+let degradadaAntes = false;
+function pintarSalud(s) {
+  const caja = $('avisoSalud');
+  if (!s || !s.degradada) {
+    caja.classList.add('oculto');
+    if (degradadaAntes) toast('Conexión con WhatsApp recuperada.', 'ok');
+    degradadaAntes = false;
+    $('estadoTexto').title = '';
+    return;
+  }
+  const hora = s.desde ? new Date(s.desde).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+  $('avisoSaludDesde').textContent = hora ? ` desde las ${hora}` : '';
+  $('avisoSaludCausa').textContent = s.causa || '';
+  $('avisoSaludConsejo').textContent = s.consejo || '';
+  $('estadoTexto').title = s.causa || '';
+  caja.classList.remove('oculto');
+  if (!degradadaAntes) toast('Conexión con WhatsApp con problemas: revisa el aviso.', 'aviso');
+  degradadaAntes = true;
+}
+
 function setEstado(estado) {
   $('estadoPunto').className = 'punto ' + estado;
   const mapa = {
     conectado: 'Conectado',
+    degradado: 'Conectado, con problemas',
     desconectado: 'Desconectado — pulsa «Conectar WhatsApp»',
     conectando: 'Conectando...',
     error: 'Error — revisa el aviso de abajo',
@@ -455,7 +480,7 @@ function setEstado(estado) {
     $('estadoTexto').textContent = mapa[estado] || estado;
   }
 
-  conectado = estado === 'conectado';
+  conectado = operativo(estado);
   $('btnCerrar').disabled = !conectado;
   $('btnConectar').disabled = estado === 'conectando' || conectado;
   if (conectado) $('qrCaja').classList.add('oculto');
@@ -869,6 +894,7 @@ function conectarEventos() {
     log('Código QR listo. Escanéalo con tu teléfono.', 'info');
   });
   es.addEventListener('estado', (e) => setEstado(JSON.parse(e.data)));
+  es.addEventListener('salud', (e) => pintarSalud(JSON.parse(e.data)));
   es.addEventListener('citas', (e) => {
     // el servidor ha marcado resultados de envío: refrescar tabla
     citas = JSON.parse(e.data);
@@ -903,14 +929,15 @@ function conectarEventos() {
   const motores = estadoInicial.motores || [];
   const actual = motores.find((m) => m.id === estadoInicial.motor);
   const otro = motores.find((m) => m.vinculado && m.id !== estadoInicial.motor);
-  if (actual && !actual.vinculado && otro && estadoInicial.estado !== 'conectado') {
+  if (actual && !actual.vinculado && otro && !operativo(estadoInicial.estado)) {
     log(`Esta versión usa ${actual.nombre}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»; QR o código). Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`, 'aviso');
   }
   if (estadoInicial.version) {
     $('versionTexto').textContent = 'v' + estadoInicial.version;
   }
   setEstado(estadoInicial.estado);
-  if (estadoInicial.ultimoError && estadoInicial.estado !== 'conectado') {
+  pintarSalud(estadoInicial.salud);
+  if (estadoInicial.ultimoError && !operativo(estadoInicial.estado)) {
     log('Último error registrado: ' + estadoInicial.ultimoError, 'error');
   }
   conectarEventos();

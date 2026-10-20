@@ -80,6 +80,10 @@ body {
 .punto.desconectado { background: var(--gris-osc); }
 .punto.conectando { background: var(--amarillo); animation: pulso 1s infinite; }
 .punto.error { background: var(--rojo); }
+.punto.degradado { background: var(--amarillo); box-shadow: 0 0 0 4px rgba(245,158,11,.25); }
+
+.aviso-salud { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+.aviso-salud-consejo { margin-top: 4px; color: #78350f; }
 @keyframes pulso { 0%,100%{opacity:1;} 50%{opacity:.3;} }
 
 /* Contenido a la izquierda y registro en una columna lateral fija bajo la cabecera */

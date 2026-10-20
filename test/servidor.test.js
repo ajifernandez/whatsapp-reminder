@@ -113,6 +113,36 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     ok('un único fallo sin respuesta no detiene el resto del lote');
   } finally { await s.cerrar(); }
 
+  // salud de la conexion: 'conectado' pasa a 'degradado' con la causa, y se recupera
+  const estadoSalud = async (s) => (await s.api('/api/estado'));
+  const esperarCon = async (s, cond, ms = 8000) => {
+    for (let t = 0; t < ms; t += 100) { const e = await estadoSalud(s); if (cond(e)) return e; await pausa(100); }
+    throw new Error('no se cumplio la condicion de salud');
+  };
+  for (const [red, texto] of [['ok', /La red funciona pero WhatsApp no responde/], ['nada', /Sin internet/], ['wa', /WhatsApp no es accesible/]]) {
+    s = await arrancar({ env: { INTERVALO_SALUD_MS: '150', SALUD_RED: red } });
+    try {
+      await s.esperarEstado('conectado');
+      await pausa(500);
+      assert.equal((await estadoSalud(s)).salud.degradada, false, 'sin fallos no se avisa');
+      fs.writeFileSync(path.join(s.dir, 'ping_falla'), '');
+      const e = await esperarCon(s, (x) => x.estado === 'degradado');
+      assert.match(e.salud.causa, texto);
+      assert.ok(e.salud.consejo && e.salud.desde, 'con consejo y hora de inicio');
+      let diag = await s.api('/api/diagnostico');
+      assert.ok(diag.log.some((l) => l.includes('Conexión con WhatsApp con problemas')));
+      assert.equal(diag.salud.degradada, true);
+      if (red === 'ok') {
+        fs.rmSync(path.join(s.dir, 'ping_falla'));
+        const r = await esperarCon(s, (x) => x.estado === 'conectado');
+        assert.equal(r.salud.degradada, false);
+        diag = await s.api('/api/diagnostico');
+        assert.ok(diag.log.some((l) => l.includes('Conexión con WhatsApp recuperada')));
+      }
+      ok(`salud (${red}): degradado con la causa correcta${red === 'ok' ? ' y recuperación a conectado' : ''}`);
+    } finally { await s.cerrar(); }
+  }
+
   // envio automatico: cita en las proximas horas con WhatsApp sin responder -> sin marcar y en pausa
   s = await arrancar({ env: { INTERVALO_AUTO_MS: '200' } });
   try {
