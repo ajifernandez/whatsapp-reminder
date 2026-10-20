@@ -7,11 +7,13 @@
 //     eventos: 'qr' (texto), 'autenticado', 'listo', 'fallo_auth' (msg), 'desconectado' (motivo)
 //     metodos: iniciar() -> rechaza si falla; idDe(numero) -> id | null; enviar(id, texto);
 //              cerrarSesion(); descartar() (sin listeners y con el navegador muerto); apagar()
-//   opts: { log(tipo, texto, ui), timeoutMs }
+//     idDe lanza sinRespuesta() (ver comun.js) si WhatsApp no contesta; null solo si el numero no tiene WhatsApp
+//   opts: { log(tipo, texto, ui), timeoutMs, esperaIdMs }
 const EventEmitter = require('events');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
+const { sinRespuesta, conLimite } = require('./comun');
 
 const DIR_APP = path.join(__dirname, '..');
 const AUTH_PATH = path.join(DIR_APP, '.wwebjs_auth');
@@ -93,7 +95,10 @@ async function diagnostico() {
   };
 }
 
-function crear({ log, timeoutMs }) {
+// Errores del navegador (pagina colgada, cerrada...): no son "numero sin WhatsApp"
+const ERROR_NAVEGADOR = /timed out|Target closed|Session closed|Protocol error|context was destroyed|detached|disconnected/i;
+
+function crear({ log, timeoutMs, esperaIdMs = 30000 }) {
   // require diferido: con el motor Baileys no hace falta cargar puppeteer
   const { Client, LocalAuth } = require('whatsapp-web.js');
   const motor = new EventEmitter();
@@ -133,15 +138,21 @@ function crear({ log, timeoutMs }) {
     const pendientes = new Map();
     let navegador = false, pagina = null, informado = false, notas = 0;
     const limitada = (texto) => { if (notas++ < 25) nota(texto); };
+    const alPedir = (r) => pendientes.set(r, `${host(r.url())} (${r.resourceType()})`);
+    const alTerminar = (r) => pendientes.delete(r);
+    // ERR_ABORTED = la propia pagina cancela una peticion (miniaturas, etc.): normal, no es un fallo
+    const alFallar = (r) => { pendientes.delete(r); const e = (r.failure() && r.failure().errorText) || '?'; if (e !== 'net::ERR_ABORTED') limitada(`Petición fallida: ${e} ${host(r.url())}`); };
+    const alErrorPagina = (e) => limitada('Error en la página: ' + String(e.message).slice(0, 120));
+    try {
     while (!descartado && !listo && seg() < timeoutMs / 1000) {
       if (!navegador && c.pupBrowser) { navegador = true; nota('Chromium lanzado'); }
       if (!pagina && c.pupPage) {
         pagina = c.pupPage;
         nota('Página creada');
-        pagina.on('request', (r) => pendientes.set(r, `${host(r.url())} (${r.resourceType()})`));
-        pagina.on('requestfinished', (r) => pendientes.delete(r));
-        pagina.on('requestfailed', (r) => { pendientes.delete(r); limitada(`Petición fallida: ${(r.failure() && r.failure().errorText) || '?'} ${host(r.url())}`); });
-        pagina.on('pageerror', (e) => limitada('Error en la página: ' + String(e.message).slice(0, 120)));
+        pagina.on('request', alPedir);
+        pagina.on('requestfinished', alTerminar);
+        pagina.on('requestfailed', alFallar);
+        pagina.on('pageerror', alErrorPagina);
       }
       if (!informado && seg() >= 45) {
         informado = true;
@@ -156,6 +167,14 @@ function crear({ log, timeoutMs }) {
       }
       await pausa(100);
     }
+    } finally {
+      // conectado (o descartado): dejar de observar; si no, se seguirian anotando peticiones
+      // de la sesion normal durante horas
+      if (pagina) {
+        pagina.off('request', alPedir); pagina.off('requestfinished', alTerminar);
+        pagina.off('requestfailed', alFallar); pagina.off('pageerror', alErrorPagina);
+      }
+    }
   }
 
   // initialize() resuelve ANTES de 'ready' y a veces no resuelve nunca (por eso el
@@ -166,12 +185,18 @@ function crear({ log, timeoutMs }) {
   };
 
   // getNumberId devuelve null si el número no tiene WhatsApp, pero con números
-  // malformados lanza una excepción interna sin mensaje útil: tratamos ambos igual
+  // malformados lanza una excepción interna sin mensaje útil: tratamos ambos igual (null).
+  // Si la pagina esta colgada (protocolTimeout de Puppeteer = 180 s por consulta) NO es un
+  // numero invalido: se corta a los esperaIdMs y se avisa como sinRespuesta.
   motor.idDe = async (numero) => {
+    let id;
     try {
-      const id = await c.getNumberId(numero);
-      return id ? id._serialized : null;
-    } catch (_) { return null; }
+      id = await conLimite(c.getNumberId(numero), esperaIdMs);
+    } catch (e) {
+      if (e.sinRespuesta || ERROR_NAVEGADOR.test(String(e && e.message))) throw sinRespuesta();
+      return null;
+    }
+    return id ? id._serialized : null;
   };
   motor.enviar = (id, texto) => c.sendMessage(id, texto);
 

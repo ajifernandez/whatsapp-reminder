@@ -10,7 +10,7 @@ const assert = require('assert');
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-baileys-'));
 fs.mkdirSync(path.join(DIR, 'motores'));
-fs.copyFileSync(path.join(__dirname, '..', 'motores', 'baileys.js'), path.join(DIR, 'motores', 'baileys.js'));
+for (const f of ['baileys.js', 'comun.js']) fs.copyFileSync(path.join(__dirname, '..', 'motores', f), path.join(DIR, 'motores', f));
 const Baileys = require(path.join(DIR, 'motores', 'baileys.js'));
 const AUTH = path.join(DIR, '.baileys_auth');
 
@@ -33,6 +33,7 @@ function libreriaFalsa() {
       s.logout = async () => { s.logoutLlamado = true; s.ev.emit('connection.update', cierre(401)); };
       s.onWhatsApp = async (jid) => {
         if (jid.startsWith('999')) throw new Error('fallo');
+        if (jid.startsWith('888')) return new Promise(() => {}); // nunca contesta
         return [{ exists: !jid.startsWith('000'), jid }];
       };
       s.sendMessage = async (id, m) => s.enviados.push([id, m.text]);
@@ -45,7 +46,7 @@ function libreriaFalsa() {
 function nuevo() {
   const lib = libreriaFalsa();
   const logs = [];
-  const m = Baileys.crear({ log: (t, x) => logs.push(x), libreria: lib });
+  const m = Baileys.crear({ log: (t, x) => logs.push(x), libreria: lib, esperaIdMs: 80 });
   const ev = [];
   for (const e of ['qr', 'autenticado', 'listo', 'desconectado', 'fallo_auth']) m.on(e, (x) => ev.push(x === undefined ? e : `${e}:${x}`));
   const ultimo = () => lib.sockets[lib.sockets.length - 1];
@@ -71,10 +72,15 @@ const ok = (n) => console.log('OK  ' + n);
   // 2. idDe y enviar
   assert.equal(await t.m.idDe('34612345678'), '34612345678@s.whatsapp.net');
   assert.equal(await t.m.idDe('000111'), null);
-  assert.equal(await t.m.idDe('999111'), null);
   await t.m.enviar('34612345678@s.whatsapp.net', 'hola');
   assert.deepEqual(t.ultimo().enviados, [['34612345678@s.whatsapp.net', 'hola']]);
-  ok('idDe: existe -> jid; sin WhatsApp o error -> null; enviar manda el texto');
+  ok('idDe: existe -> jid; sin WhatsApp -> null; enviar manda el texto');
+
+  // 2b. error o silencio de WhatsApp NO es "numero sin WhatsApp": sinRespuesta
+  for (const numero of ['999111', '888111']) {
+    await assert.rejects(t.m.idDe(numero), (e) => e.sinRespuesta === true, numero);
+  }
+  ok('idDe: error o sin contestar (límite) -> sinRespuesta, no "sin WhatsApp"');
 
   // 3. cortes de red: reintenta con espera y se rinde tras 5 (setTimeout acelerado)
   const reloj = global.setTimeout;
