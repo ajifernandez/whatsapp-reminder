@@ -78,6 +78,18 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     assert.ok(!JSON.stringify(diag).includes('612345678'), 'el telefono no sale en el informe');
     ok('diagnostico: motor y log anonimizado');
 
+    // texto libre: solo scripts del mismo equipo (sin Origin) y solo JSON
+    const libre = (cuerpo, cab = {}) => fetch(s.base + '/api/mensaje', { method: 'POST', headers: { 'Content-Type': 'application/json', ...cab }, body: JSON.stringify(cuerpo) });
+    assert.equal((await libre({ telefono: '612345678', texto: 'Aviso de prueba\ncon dos líneas' })).status, 200);
+    const ultimo = fs.readFileSync(path.join(s.dir, 'enviados.log'), 'utf8').trim().split('\n').map(JSON.parse).pop();
+    assert.deepEqual(ultimo, { id: '34612345678@s.whatsapp.net', texto: 'Aviso de prueba\ncon dos líneas' }, 'texto tal cual, con saltos de línea, sin plantilla');
+    assert.equal((await libre({ telefono: '612345678', texto: 'x' }, { Origin: s.base })).status, 403, 'desde una web (aunque sea la propia) no');
+    assert.equal((await fetch(s.base + '/api/mensaje', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: '{"telefono":"612345678","texto":"x"}' })).status, 403, 'solo JSON');
+    assert.equal((await libre({ telefono: '612345678' })).status, 400);
+    assert.equal((await libre({ telefono: '611111000', texto: 'x' })).status, 404, 'sin WhatsApp');
+    assert.ok(!(await s.api('/api/diagnostico')).log.some((l) => l.includes('612345678')), 'el teléfono no sale en el informe');
+    ok('texto libre: solo desde scripts del mismo equipo (sin Origin, JSON), tal cual y sin plantilla');
+
     s.orden('desconectar');
     await s.esperarEstado('desconectado');
     ok('evento desconectado -> estado desconectado');

@@ -947,6 +947,29 @@ app.post('/api/enviar', async (req, res) => {
   }
 });
 
+// Texto libre (p. ej. avisos de soporte), SOLO para scripts en este mismo PC: conexion desde 127.0.0.1/::1,
+// sin cabecera Origin (los navegadores la mandan siempre: ninguna web puede usarlo) y solo JSON.
+// Uso: curl -X POST localhost:3000/api/mensaje -H 'Content-Type: application/json' -d '{"telefono":"6xxxxxxxx","texto":"..."}'
+const ES_LOCAL = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+app.post('/api/mensaje', async (req, res) => {
+  if (!ES_LOCAL.has(req.socket.remoteAddress) || req.headers.origin || !req.is('application/json')) {
+    return res.status(403).json({ error: 'Solo para scripts en este mismo equipo' });
+  }
+  const numero = normalizarTelefono((req.body || {}).telefono || '');
+  const texto = typeof (req.body || {}).texto === 'string' ? req.body.texto.trim() : '';
+  if (numero.length < 10 || !texto || texto.length > 4000) return res.status(400).json({ error: 'Faltan telefono o texto (máx. 4000 caracteres)' });
+  if (!clientReady || !client) return res.status(409).json({ error: 'WhatsApp no está conectado' });
+  try {
+    const id = await client.idDe(numero);
+    if (!id) return res.status(404).json({ error: 'Ese número no tiene WhatsApp' });
+    await client.enviar(id, texto);
+    registrarLog('info', `Mensaje de texto libre enviado (${numero})`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.sinRespuesta ? 504 : 502).json({ error: err.sinRespuesta ? 'WhatsApp no responde' : err.message });
+  }
+});
+
 // ---------- Actualizaciones ----------
 
 app.get('/api/actualizacion', async (_req, res) => {
