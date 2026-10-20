@@ -82,7 +82,18 @@ body {
 .punto.error { background: var(--rojo); }
 @keyframes pulso { 0%,100%{opacity:1;} 50%{opacity:.3;} }
 
-main { max-width: 960px; margin: 22px auto; padding: 0 20px; display: flex; flex-direction: column; gap: 20px; }
+/* Contenido a la izquierda y registro en una columna lateral fija bajo la cabecera */
+.contenedor { max-width: 1360px; margin: 22px auto; padding: 0 20px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
+main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.panel-registro { position: sticky; top: 84px; }
+.panel-registro .tarjeta { display: flex; flex-direction: column; max-height: calc(100vh - 106px); }
+.panel-registro .log { max-height: none; flex: 1; min-height: 0; font-size: 13px; }
+@media (max-width: 1100px) {
+  .contenedor { grid-template-columns: minmax(0, 1fr); max-width: 960px; }
+  .panel-registro { position: static; }
+  .panel-registro .tarjeta { max-height: none; }
+  .panel-registro .log { max-height: 220px; }
+}
 
 .tarjeta {
   background: #fff;
