@@ -149,6 +149,14 @@ Para saber si una clínica funciona **sin que envíe el diagnóstico**, cada apl
 - La aplicación solo aparece en la lista desde la versión que incluye esta función.
 - Si el receptor no está disponible, la app lo anota **una vez** en `app.log` y sigue sin molestar. Para pruebas, `LATIDO_URL=` (vacío) desactiva los latidos.
 
+## Mensaje de texto libre (solo scripts del propio equipo)
+
+`POST /api/mensaje` con `{"telefono": "6xxxxxxxx", "texto": "..."}` envía el texto tal cual (con saltos de línea, sin la plantilla). Solo acepta conexiones desde el propio equipo (`127.0.0.1`/`::1`), sin cabecera `Origin` (ninguna página web, ni la propia, puede usarlo) y en JSON. Se usa para avisos de soporte; queda anotado en el log sin el teléfono en el informe.
+
+```
+curl -X POST localhost:3000/api/mensaje -H 'Content-Type: application/json' -d '{"telefono":"6xxxxxxxx","texto":"Hola"}'
+```
+
 ## Diagnóstico de problemas de conexión
 
 Con la app abierta, visitar `http://localhost:PUERTO/api/diagnostico` (mismo puerto que la app). Devuelve versión, estado, último error, SO/Node, RAM libre, si hay sesión vinculada, locks de Chromium y las últimas 80 líneas del log. El botón «✉ Enviar diagnóstico» de la cabecera lo envía desde el servidor al receptor de soporte (`soporte-server/`, ver su `compose.yaml` para Dockge; la interfaz web `/` lista los informes con usuario `ADMIN_USER` y contraseña `ADMIN_PASS`; la URL va en `DIAG_URL` de `server.js`). Si no hay receptor configurado o falla (sin internet), descarga el informe `.json` y abre el correo para adjuntarlo a mano. El log se anonimiza antes: nombres y teléfonos de pacientes salen como `[nombre]` y `[tel]` (función `anonimizar` en `server.js`; si se añaden logs con datos personales, revisarla).
