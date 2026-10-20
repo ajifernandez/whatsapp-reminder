@@ -22,7 +22,8 @@
       <button id="btnActualizar" class="btn btn-gris pequeno" title="Comprueba si hay una versión nueva del software y la instala">⟳ Comprobar versión</button>
       <button id="btnDiagnostico" class="btn btn-gris pequeno" title="Envía a soporte un informe técnico (sin datos de pacientes). Si no hay conexión, lo descarga y abre el correo">✉ Enviar diagnóstico</button>
       <button id="btnApagar" class="btn btn-gris pequeno" title="Cierra la aplicación de forma segura (también WhatsApp)">⏻ Apagar</button>
-      <select id="selVersion" class="pequeno" title="Instalar una versión anterior" disabled><option value="">Versión…</option></select>
+      <!-- oculto desde 2.2.1: no funcionaba bien; el soporte usa node update.js X.Y.Z | latest -->
+      <select id="selVersion" class="pequeno oculto" title="Instalar una versión anterior" disabled><option value="">Versión…</option></select>
     </div>
   </header>
 

@@ -729,11 +729,11 @@ app.post('/api/actualizar', async (_req, res) => {
   try {
     const { local, remota, hayActualizacion, fijada, nuevaMayor } = await updater.buscarActualizacion();
     if (nuevaMayor) {
-      emitir('log', { tipo: 'aviso', texto: `Hay una versión mayor nueva (${nuevaMayor}). No se instala sola: elige «Última versión» en el selector de versión cuando quieras instalarla.` });
+      emitir('log', { tipo: 'aviso', texto: `Hay una versión mayor nueva (${nuevaMayor}). No se instala sola: avisa a soporte para instalarla.` });
       return res.json({ actualizado: false, version: local, nuevaMayor });
     }
     if (fijada) {
-      emitir('log', { tipo: 'aviso', texto: `Versión fijada en ${local}: no se actualiza sola. Elige «Última (automática)» en el selector de versión para volver.` });
+      emitir('log', { tipo: 'aviso', texto: `Versión fijada en ${local}: no se actualiza sola. Para volver a la última, avisa a soporte.` });
       return res.json({ actualizado: false, version: local, fijada: true });
     }
     if (!hayActualizacion) {
