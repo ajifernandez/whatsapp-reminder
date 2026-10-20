@@ -11,7 +11,15 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || '/data';
-const NTFY_URL = process.env.NTFY_URL || ''; // opcional: https://ntfy.tudominio/tema
+const NTFY_URL = process.env.NTFY_URL || ''; // opcional: https://ntfy.tudominio/tema (diagnósticos y cambios de estado de clínicas)
+// Estados que merecen aviso push cuando una clínica entra en ellos
+const ESTADOS_AVISO = new Set(['desconectado', 'warning']);
+
+// Aviso push por ntfy (si NTFY_URL está definido). Nunca bloquea ni rompe la petición.
+function avisarPush(titulo, cuerpo, prioridad = 'default') {
+  if (!NTFY_URL) return;
+  fetch(NTFY_URL, { method: 'POST', headers: { Title: titulo.slice(0, 120), Priority: prioridad }, body: cuerpo.slice(0, 400) }).catch(() => {});
+}
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || '';
 const ZONA = process.env.TZ || 'Europe/Madrid';
@@ -81,6 +89,7 @@ nav{margin-bottom:14px;font-size:15px}nav a{margin-right:14px;color:#2b6cb0;text
 .chip{display:inline-block;padding:2px 10px;border-radius:12px;font-weight:600;font-size:13px;white-space:nowrap}
 .ok{background:#dcfce7;color:#166534}.warning{background:#fef3c7;color:#92400e}.conectando{background:#dbeafe;color:#1e40af}
 .desconectado{background:#fee2e2;color:#991b1b}.offline{background:#4b5563;color:#fff}.apagada{background:#e5e7eb;color:#374151}
+.historial{margin:4px 0 0;padding-left:18px;font-size:12px;color:#444}.historial li{margin:2px 0}
 .resumen{margin:0 0 14px}.resumen .chip{margin-right:8px}a.accion{font-size:12px;margin-left:8px;color:#2b6cb0}`;
 
 function plantilla(titulo, activa, cuerpo, extra = '') {
@@ -165,14 +174,32 @@ function registrarLatido(l, ip) {
     if (Object.keys(clinicas).length >= MAX_CLINICAS) return false;
     c = clinicas[l.id] = { id: l.id, alias: null, primero: ahora, cambios: [] };
   }
+  const esNueva = !c.ultimo; // primer latido: no hay estado anterior real que comparar
   const cambio = c.estado !== l.estado;
+  const estadoAnterior = esNueva ? null : estadoVisible(c, ahora);
   Object.assign(c, l, { ip, ultimo: ahora });
   if (cambio) {
     c.desdeEstado = ahora;
     c.cambios = [...c.cambios, { t: ahora, estado: l.estado }].slice(-20);
   }
+  // Aviso solo al ENTRAR en un estado malo (no en cada latido) y solo si antes estaba bien
+  const estadoNuevo = estadoVisible(c, ahora);
+  if (!esNueva && estadoNuevo !== estadoAnterior && ESTADOS_AVISO.has(estadoNuevo) && !['offline', 'desconectado'].includes(estadoAnterior)) {
+    avisarPush(`${ETIQUETA[estadoNuevo]}: ${c.alias || c.host}`, detalle(c, estadoNuevo, ahora), estadoNuevo === 'desconectado' ? 'high' : 'default');
+  }
+  // y uno al RECUPERARSE de un estado malo
+  if (!esNueva && estadoNuevo === 'ok' && ['warning', 'desconectado', 'offline'].includes(estadoAnterior)) {
+    avisarPush(`Recuperada: ${c.alias || c.host}`, `Vuelve a estar OK (estaba ${ETIQUETA[estadoAnterior].toLowerCase()}).`, 'low');
+  }
   guardarClinicas();
   return true;
+}
+
+// Historial de transiciones (las ultimas 20) en un desplegable de la fila
+function historialHtml(c) {
+  if (!c.cambios || !c.cambios.length) return '';
+  const lineas = c.cambios.slice().reverse().map((x) => `<li>${esc(new Date(x.t).toLocaleString('es-ES', { timeZone: ZONA, dateStyle: 'short', timeStyle: 'short' }))} · ${esc(x.estado)}</li>`).join('');
+  return `<details><summary><small>historial (${c.cambios.length})</small></summary><ul class="historial">${lineas}</ul></details>`;
 }
 
 // Solo lo que cambia (resumen y tabla): la pagina lo pide cada pocos segundos y lo sustituye
@@ -192,7 +219,7 @@ function contenidoClinicas() {
 <td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
 <td>${esc(hace(ahora - c.ultimo))}</td>
 <td>${esc(c.desdeEstado ? hace(ahora - c.desdeEstado) : '')}</td>
-<td><small>${esc(c.ip)}</small></td></tr>`);
+<td><small>${esc(c.ip)}</small>${historialHtml(c)}</td></tr>`);
   return `<h1>Clínicas (${filas.length})</h1>
 <p class="resumen">${resumen || 'Aún no ha llegado ningún latido.'}</p>
 <table><tr><th>Estado</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=7>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
