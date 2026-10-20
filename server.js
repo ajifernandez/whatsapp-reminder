@@ -3,16 +3,17 @@ const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const { execFile } = require('child_process');
-const { Client, LocalAuth } = require('whatsapp-web.js');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const CITAS_PATH = path.join(DATA_DIR, 'citas.json');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
-const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
-const CACHE_PATH = path.join(__dirname, '.wwebjs_cache');
 const LOG_PATH = path.join(DATA_DIR, 'app.log');
 const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
+// Motor de WhatsApp (motores/*.js). Se elige con "motor" en data/config.json; cambiarlo
+// requiere reiniciar la aplicacion.
+const MOTORES = { wwebjs: './motores/wwebjs' };
+const MOTOR_POR_DEFECTO = 'wwebjs';
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -84,7 +85,7 @@ function guardarCitas(citas) {
 }
 
 function leerConfig() {
-  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false };
+  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: MOTOR_POR_DEFECTO };
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(configBase, null, 2), 'utf8');
     return configBase;
@@ -94,7 +95,8 @@ function leerConfig() {
     const datos = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
-      autoEnvio: datos.autoEnvio === true
+      autoEnvio: datos.autoEnvio === true,
+      motor: Object.hasOwn(MOTORES, datos.motor) ? datos.motor : MOTOR_POR_DEFECTO
     };
   } catch (_) {
     return configBase;
@@ -186,101 +188,15 @@ function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
   return plantilla.replace(/\{(nombre|telefono|fecha|hora|especialidad)\}/gi, (_match, campo) => valores[campo.toLowerCase()] ?? '');
 }
 
-// ---------- Cliente WhatsApp ----------
-// Borra cache de version web de WhatsApp. En Windows (sobre todo version
-// portable) una escritura interrumpida deja este cache corrupto y el cliente
-// se queda colgado al iniciar sin emitir 'qr' ni 'ready'. Limpiar antes de
-// arrancar evita tener que borrar la carpeta a mano.
-function limpiarCacheWeb() {
-  try {
-    if (fs.existsSync(CACHE_PATH)) {
-      fs.rmSync(CACHE_PATH, { recursive: true, force: true });
-    }
-  } catch (err) {
-    emitir('log', { tipo: 'error', texto: 'No se pudo limpiar cache: ' + err.message });
-  }
-}
+// ---------- Cliente WhatsApp (lo propio de cada libreria vive en motores/) ----------
+const Motor = require(MOTORES[leerConfig().motor]);
+// log del motor: ui=true tambien lo muestra en la pagina
+const logMotor = (tipo, texto, ui = false) => (ui ? emitir('log', { tipo, texto }) : registrarLog(tipo, texto));
 
-// Tras apagar el PC / kill -9, Chromium deja SingletonLock/Cookie/Socket en el
-// perfil y el siguiente arranque se cuelga creyendo que otra instancia lo usa.
-// Aquí solo corre un Chromium (el nuestro, aún sin crear), así que son seguros de borrar.
-let locksAlArrancar = [];
-function limpiarLocksChromium() {
-  const dir = path.join(AUTH_PATH, 'session');
-  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort']) {
-    try {
-      const ruta = path.join(dir, f);
-      if (fs.existsSync(ruta) || fs.lstatSync(ruta, { throwIfNoEntry: false })) {
-        registrarLog('aviso', `Lock huérfano de Chromium eliminado: ${f}`);
-        locksAlArrancar.push(f);
-      }
-      fs.rmSync(ruta, { force: true });
-    } catch (_) { /* ignorar */ }
-  }
-}
+function crearCliente() {
+  const c = Motor.crear({ log: logMotor, timeoutMs: TIMEOUT_CONEXION_MS });
 
-// Chromium de NUESTRO perfil que sigue vivo (p. ej. tras un timeout cuyo destroy() no
-// lo mato): mantiene el perfil bloqueado y el siguiente intento se cuelga. Solo se
-// tocan procesos de navegador cuya linea de comandos lleva nuestra ruta de perfil,
-// nunca el Chrome del usuario.
-const PERFIL_DIR = path.join(path.resolve(AUTH_PATH), 'session');
-const ejecutar = (cmd, args) => new Promise((resolve) => {
-  execFile(cmd, args, { timeout: 15000, windowsHide: true }, (_err, stdout) => resolve(String(stdout || '')));
-});
-
-// Devuelve cuantos procesos hay (y los termina si matar=true).
-async function chromiumDelPerfil(matar) {
-  try {
-    if (process.platform === 'win32') {
-      const ruta = PERFIL_DIR.replace(/'/g, "''");
-      const ps = "$p=@(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.Name -match '^(chrome|chromium|msedge|chrome-headless-shell)\\.exe$' -and $_.CommandLine -and $_.CommandLine.Contains('" + ruta + "') });"
-        + (matar ? '$p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };' : '') + '$p.Count';
-      return parseInt((await ejecutar('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps])).trim(), 10) || 0;
-    }
-    const patron = '--user-data-dir=' + PERFIL_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const n = (await ejecutar('pgrep', ['-f', '--', patron])).split('\n').filter(Boolean).length;
-    if (matar && n) await ejecutar('pkill', ['-9', '-f', '--', patron]);
-    return n;
-  } catch (_) { return 0; }
-}
-
-// Termina un cliente descartado sin dejar su Chromium vivo ni sus listeners activos
-// (un 'ready' tardio de un cliente viejo marcaria como conectado a uno que ya no usamos).
-function descartarCliente(c) {
-  if (!c) return;
-  c.removeAllListeners();
-  try {
-    const proc = c.pupBrowser && c.pupBrowser.process();
-    if (proc && proc.pid) {
-      if (process.platform === 'win32') execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true }, () => {});
-      else process.kill(proc.pid, 'SIGKILL');
-    }
-  } catch (_) { /* ya estaba muerto */ }
-  c.destroy().catch(() => {});
-}
-
-function crearClienteSiHaceFalta() {
-  if (client) return;
-
-  limpiarCacheWeb();
-  limpiarLocksChromium();
-
-  client = new Client({
-    authStrategy: new LocalAuth({ dataPath: path.resolve(AUTH_PATH) }),
-    webVersionCache: { type: 'none' },
-    puppeteer: {
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-extensions',
-        '--disable-gpu',
-        '--disable-dev-shm-usage'
-      ]
-    }
-  });
-
-  client.on('qr', async (qr) => {
+  c.on('qr', async (qr) => {
     try {
       const dataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 1 });
       emitir('qr', dataUrl);
@@ -289,11 +205,9 @@ function crearClienteSiHaceFalta() {
     }
   });
 
-  client.on('loading_screen', (pct, msg) => registrarLog('info', `Cargando WhatsApp Web: ${pct}% ${msg || ''}`));
+  c.on('autenticado', () => emitir('log', { tipo: 'info', texto: 'Autenticado, conectando...' }));
 
-  client.on('authenticated', () => emitir('log', { tipo: 'info', texto: 'Autenticado, conectando...' }));
-
-  client.on('ready', () => {
+  c.on('listo', () => {
     pararTemporizadorConexion();
     conectando = false;
     clientReady = true;
@@ -302,7 +216,7 @@ function crearClienteSiHaceFalta() {
     emitir('log', { tipo: 'ok', texto: 'WhatsApp conectado y listo.' });
   });
 
-  client.on('auth_failure', (msg) => {
+  c.on('fallo_auth', (msg) => {
     pararTemporizadorConexion();
     conectando = false;
     clientReady = false;
@@ -310,7 +224,7 @@ function crearClienteSiHaceFalta() {
     emitir('log', { tipo: 'error', texto: 'Error de autenticación: ' + msg });
   });
 
-  client.on('disconnected', (reason) => {
+  c.on('desconectado', (reason) => {
     pararTemporizadorConexion();
     conectando = false;
     clientReady = false;
@@ -318,6 +232,7 @@ function crearClienteSiHaceFalta() {
     emitir('log', { tipo: 'error', texto: 'Sesión desconectada: ' + reason });
     client = null;
   });
+  return c;
 }
 
 const COOLDOWN_RECONEXION_MS = 30 * 1000; // evita reintentos en bucle (posible causa de bloqueo)
@@ -364,14 +279,14 @@ async function iniciarSesion() {
   conectando = true;
   emitir('estado', 'conectando');
   if (!client) {
-    const huerfanos = await chromiumDelPerfil(true);
+    const huerfanos = await Motor.prepararArranque(logMotor);
     if (huerfanos) emitir('log', { tipo: 'aviso', texto: `Se cerraron ${huerfanos} procesos de Chromium que habían quedado abiertos de un intento anterior.` });
+    client = crearCliente();
   }
-  crearClienteSiHaceFalta();
   const c = client;
 
-  // Si whatsapp-web.js/puppeteer se cuelga cargando la página (pasa a veces),
-  // client.initialize() no rechaza ni resuelve nunca: sin este límite se
+  // Si el motor se cuelga conectando (whatsapp-web.js cargando la página, pasa a veces),
+  // iniciar() no rechaza ni resuelve nunca: sin este límite se
   // quedaría en "Conectando..." para siempre, sin avisar ni dejar reintentar.
   temporizadorConexion = setTimeout(() => {
     if (clientReady) return;
@@ -379,33 +294,30 @@ async function iniciarSesion() {
     emitir('log', { tipo: 'error', texto: `La conexión tardó más de ${TIMEOUT_CONEXION_MS / 1000}s y se canceló. Pulsa "Conectar WhatsApp" para reintentar.` });
     if (client === c) client = null;
     conectando = false;
-    // sin listeners (destroy() emitiria 'disconnected' y machacaria el estado 'error')
-    // y con el navegador terminado de verdad
-    descartarCliente(c);
+    // sin listeners (un 'desconectado' machacaria el estado 'error') y terminado de verdad
+    c.descartar();
   }, TIMEOUT_CONEXION_MS);
 
-  // NOTA: conectando se libera solo en estados finales (ready, auth_failure,
-  // disconnected, error de initialize o timeout). initialize() resuelve ANTES
-  // de que llegue 'ready': si se liberara aquí, un clic en "Conectar" durante
-  // ese hueco caería en el cooldown y pondría estado 'desconectado' aunque la
-  // conexión siguiera en marcha.
-  vigilarConexion(c).catch(() => {});
-  c.initialize().catch((err) => {
+  // NOTA: conectando se libera solo en estados finales (listo, fallo_auth,
+  // desconectado, error de iniciar o timeout). iniciar() puede resolver ANTES
+  // de 'listo': si se liberara aquí, un clic en "Conectar" durante ese hueco
+  // caería en el cooldown y pondría estado 'desconectado' aunque la conexión
+  // siguiera en marcha.
+  c.iniciar().catch((err) => {
     if (client !== c) return; // ya descartado (timeout): el aviso ya se dio
     // si el cliente fallido se quedara en 'client', el siguiente intento lo reutilizaria roto
     pararTemporizadorConexion();
     client = null;
     conectando = false;
-    descartarCliente(c);
+    c.descartar();
     emitir('estado', 'error');
-    emitir('log', { tipo: 'error', texto: 'Error al iniciar: ' + err.message });
+    emitir('log', { tipo: 'error', texto: 'Error al iniciar: ' + ((err && err.message) || err) });
   });
 }
 
 async function cerrarSesion() {
   if (!client) return;
-  try { await client.logout(); } catch (_) { /* ignorar */ }
-  try { await client.destroy(); } catch (_) { /* ignorar */ }
+  await client.cerrarSesion();
   client = null;
   clientReady = false;
   emitir('estado', 'desconectado');
@@ -423,17 +335,14 @@ async function enviarUna(cita, mensaje) {
   // número español sin prefijo (9 dígitos empezando por 6/7/8/9): añadir 34
   if (/^[6789]\d{8}$/.test(numero)) numero = '34' + numero;
 
-  // getNumberId devuelve null si el número no tiene WhatsApp, pero con números
-  // malformados lanza una excepción interna sin mensaje útil: tratamos ambos igual
-  let numeroId = null;
-  try { numeroId = await client.getNumberId(numero); } catch (_) { /* número no válido */ }
-  if (!numeroId) {
+  const id = await client.idDe(numero); // null: número no válido o sin WhatsApp
+  if (!id) {
     emitir('log', { tipo: 'aviso', texto: `${cita.nombre || 'Sin nombre'} (${cita.telefono}): el número no es válido o no tiene WhatsApp, no se envió.` });
     return 'omitido';
   }
 
   try {
-    await client.sendMessage(numeroId._serialized, formatearMensaje(cita, mensaje));
+    await client.enviar(id, formatearMensaje(cita, mensaje));
     emitir('log', { tipo: 'ok', texto: `Enviado a ${cita.nombre} (${cita.telefono})` });
     return 'enviado';
   } catch (err) {
@@ -646,6 +555,10 @@ async function pruebaRed() {
   }
 }
 
+const ejecutar = (cmd, args) => new Promise((resolve) => {
+  execFile(cmd, args, { timeout: 15000, windowsHide: true }, (_err, stdout) => resolve(String(stdout || '')));
+});
+
 // Chromium usa el proxy de Windows (Internet Settings), no el de Node. Sin credenciales.
 async function proxyDelSistema() {
   const r = { variablesEntorno: ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY'].filter((k) => process.env[k] || process.env[k.toLowerCase()]) };
@@ -659,62 +572,19 @@ async function proxyDelSistema() {
   return r;
 }
 
-// Registra en que fase se atasca una conexion lenta: Chromium lanzado, pagina creada,
-// peticiones fallidas y, a los 45 s, las que siguen pendientes (el cuelgue de la clinica
-// esta en la carga de web.whatsapp.com, que espera a TODOS sus recursos). Solo hosts y
-// estados, nunca contenido de la pagina: podria haber chats.
-async function vigilarConexion(c) {
-  const t0 = Date.now();
-  const seg = () => Math.round((Date.now() - t0) / 1000);
-  const nota = (texto) => registrarLog('info', `[conexión +${seg()}s] ${texto}`);
-  const host = (u) => { try { const x = new URL(u); return x.host || x.protocol; } catch (_) { return '?'; } };
-  const pendientes = new Map();
-  let navegador = false, pagina = null, informado = false, notas = 0;
-  const limitada = (texto) => { if (notas++ < 25) nota(texto); };
-  while (client === c && !clientReady && seg() < TIMEOUT_CONEXION_MS / 1000) {
-    if (!navegador && c.pupBrowser) { navegador = true; nota('Chromium lanzado'); }
-    if (!pagina && c.pupPage) {
-      pagina = c.pupPage;
-      nota('Página creada');
-      pagina.on('request', (r) => pendientes.set(r, `${host(r.url())} (${r.resourceType()})`));
-      pagina.on('requestfinished', (r) => pendientes.delete(r));
-      pagina.on('requestfailed', (r) => { pendientes.delete(r); limitada(`Petición fallida: ${(r.failure() && r.failure().errorText) || '?'} ${host(r.url())}`); });
-      pagina.on('pageerror', (e) => limitada('Error en la página: ' + String(e.message).slice(0, 120)));
-    }
-    if (!informado && seg() >= 45) {
-      informado = true;
-      const hosts = [...new Set(pendientes.values())].slice(0, 8).join(', ');
-      nota(`Sin conectar: ${pendientes.size} peticiones pendientes${hosts ? ': ' + hosts : ''}; navegador=${navegador}, página=${!!pagina}${pagina ? ', url=' + host(pagina.url()) : ''}`);
-      if (pagina) {
-        try {
-          const estado = await Promise.race([pagina.evaluate(() => document.readyState), pausa(3000)]);
-          nota('Estado de la página: ' + (estado || 'sin respuesta en 3 s'));
-        } catch (e) { nota('Estado de la página: error ' + String(e.message).slice(0, 80)); }
-      }
-    }
-    await pausa(100);
-  }
-}
-
 async function informeDiagnostico() {
   const os = require('os');
-  const version = (modulo) => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'node_modules', modulo, 'package.json'), 'utf8')).version; } catch (_) { return null; } };
-  let chromiumRuta = null; try { chromiumRuta = require('puppeteer').executablePath(); } catch (_) { /* sin puppeteer */ }
   let discoLibreMB = null; try { const f = fs.statfsSync(__dirname); discoLibreMB = Math.round((f.bavail * f.bsize) / 1048576); } catch (_) { /* sin statfs */ }
-  const [red, proxy] = await Promise.all([pruebaRed(), proxyDelSistema()]);
-  const sesion = path.join(AUTH_PATH, 'session');
-  const locks = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].filter((f) => fs.lstatSync(path.join(sesion, f), { throwIfNoEntry: false }));
+  const [red, proxy, delMotor] = await Promise.all([pruebaRed(), proxyDelSistema(), Motor.diagnostico()]);
   let log = [];
   try { log = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n').slice(-80); } catch (_) { /* sin log */ }
   return {
     version: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
-    sesionVinculada: fs.existsSync(sesion), locksChromium: locks,
-    lockYaExistiaAlArrancar: locksAlArrancar, citas: leerCitas().length,
-    procesosChromiumPerfil: await chromiumDelPerfil(false), whatsappWebJs: version('whatsapp-web.js'), puppeteer: version('puppeteer'),
-    redWhatsApp: red, proxy,
-    chromiumRuta: sinUsuario(chromiumRuta), rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
+    citas: leerCitas().length, motor: Motor.nombre,
+    ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
+    redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
     log: log.map(anonimizar)
   };
 }
@@ -832,7 +702,7 @@ const server = app.listen(PORT, () => {
 
   // Si ya había una sesión de WhatsApp vinculada antes, intenta reconectar
   // sola al arrancar en vez de obligar a pulsar "Conectar" cada vez.
-  if (fs.existsSync(path.join(AUTH_PATH, 'session'))) {
+  if (Motor.sesionGuardada()) {
     registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
     iniciarSesion();
   }
@@ -860,12 +730,11 @@ async function apagar(motivo) {
 
   await new Promise((resolve) => server.close(() => resolve()));
 
-  // destruir el cliente WhatsApp mata el Chromium de Puppeteer
+  // cerrar el motor (con whatsapp-web.js, mata el Chromium de Puppeteer)
   if (client) {
     try {
-      await Promise.race([client.destroy(), pausa(5000)]); // destroy() puede colgarse
-      descartarCliente(client); // y si lo hizo, se mata el navegador igualmente
-      console.log('Procesos de Chromium cerrados correctamente.');
+      await client.apagar();
+      console.log('Cliente de WhatsApp cerrado correctamente.');
     } catch (_) { /* ignorar */ }
   }
 

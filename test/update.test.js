@@ -84,6 +84,14 @@ const ok = (n) => console.log('OK  ' + n);
   await assert.rejects(u.aplicarActualizacion());
   assert.equal(lee('server.js'), null);
   ok('si un fichero de la lista no existe: falla y no escribe nada');
+  // 10. la lista real del repo: todo existe y no falta ningún motor (si falta, la clínica
+  // bajaría un server.js que requiere un fichero que no se descarga y no arrancaría)
+  const RAIZ = path.join(__dirname, '..');
+  const real = JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8')).archivosActualizables;
+  for (const f of real) assert.ok(fs.existsSync(path.join(RAIZ, f)), 'no existe ' + f);
+  for (const f of fs.readdirSync(path.join(RAIZ, 'motores'))) assert.ok(real.includes('motores/' + f), 'falta en archivosActualizables: motores/' + f);
+  ok('archivosActualizables del repo: todo existe y están todos los motores');
+
   console.log('\nTODAS LAS PRUEBAS DEL UPDATER PASAN');
   fs.rmSync(DIR, { recursive: true, force: true });
 })().catch((e) => { console.error('FALLO:', e); process.exit(1); });
