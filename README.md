@@ -86,6 +86,15 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 - No es la API oficial de Meta: pensado para recordatorios personales o de consultas pequeñas, no para envíos masivos ni spam.
 - Requiere que el móvil vinculado tenga conexión a internet.
 
+## Versiones mayores, canal beta y ficheros nuevos
+
+- **Freno de versión mayor**: en el canal estable el auto-update solo actúa dentro de la misma versión mayor (2.x → 2.x). Una 3.0 en `main` solo se avisa («versión mayor nueva»); se instala de forma explícita con «Última versión» en el selector de la cabecera o `node update.js latest`.
+- **Canal beta por clínica**: `node update.js canal v3` hace que esa clínica siga la rama `v3` (sin freno: elegir el canal ya es aceptar la beta). `node update.js canal main` la devuelve a estable. Se guarda en `data/canal.txt` y sale en el diagnóstico (`canal`).
+- **Lista de ficheros remota**: el updater baja los ficheros que indica `archivosActualizables` en el `package.json` **remoto**, así una versión nueva puede añadir ficheros (p. ej. un motor empaquetado en `vendor/`). Rutas relativas sin `..`; si la lista falta o es inválida, usa la lista mínima de `update.js`.
+- **Sin npm en la clínica**: la versión portable solo trae `bin\node.exe`, así que las dependencias nuevas deben ir empaquetadas como ficheros en `archivosActualizables`, no en `node_modules`.
+- Regla: no fusionar una versión mayor en `main` hasta que todas las clínicas informen (diagnóstico) una versión con freno (≥ 2.1.17); un updater más antiguo no frena.
+- Pruebas del updater (sin red): `npm test`.
+
 ## Volver a una versión anterior (downgrade)
 
 Desde la carpeta de la app: `node update.js 2.1.11` instala esa versión (tags `vX.Y.Z` de GitHub) y crea `data/version-fija.txt`, que desactiva el auto-update. Para volver a seguir la última: `node update.js latest`. También desde la cabecera de la app: selector «Versión…» (pide confirmación; muestra 🔒 si hay versión fijada). Solo se queda fijada si la versión destino es 2.1.11 o posterior (las anteriores no conocen la fijación y se actualizarían solas). Al publicar una versión nueva: `git tag vX.Y.Z && git push --tags`.

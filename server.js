@@ -707,7 +707,7 @@ async function informeDiagnostico() {
   let log = [];
   try { log = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n').slice(-80); } catch (_) { /* sin log */ }
   return {
-    version: updater.versionLocal(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
+    version: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
     sesionVinculada: fs.existsSync(sesion), locksChromium: locks,
@@ -792,7 +792,11 @@ app.post('/api/version', async (req, res) => {
 // se ven al recargar el navegador.
 app.post('/api/actualizar', async (_req, res) => {
   try {
-    const { local, remota, hayActualizacion, fijada } = await updater.buscarActualizacion();
+    const { local, remota, hayActualizacion, fijada, nuevaMayor } = await updater.buscarActualizacion();
+    if (nuevaMayor) {
+      emitir('log', { tipo: 'aviso', texto: `Hay una versión mayor nueva (${nuevaMayor}). No se instala sola: elige «Última versión» en el selector de versión cuando quieras instalarla.` });
+      return res.json({ actualizado: false, version: local, nuevaMayor });
+    }
     if (fijada) {
       emitir('log', { tipo: 'aviso', texto: `Versión fijada en ${local}: no se actualiza sola. Elige «Última (automática)» en el selector de versión para volver.` });
       return res.json({ actualizado: false, version: local, fijada: true });
