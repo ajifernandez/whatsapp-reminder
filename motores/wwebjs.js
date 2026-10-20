@@ -111,6 +111,24 @@ async function sondaPagina(pagina) {
   return foto;
 }
 
+// «WhatsApp está abierto en otra ventana · Usar aquí»: la MISMA sesion esta abierta en otro sitio (casi
+// siempre otra copia de la aplicacion). whatsapp-web.js solo toma el control (takeoverOnConflict) cuando ya
+// esta conectado; esta pantalla sale ANTES, y la conexion se queda esperando a que alguien pulse el boton.
+// Devuelve true si lo ha pulsado.
+async function pulsarUsarAqui(pagina) {
+  if (!pagina) return false;
+  return Promise.race([
+    pagina.evaluate(() => {
+      const boton = [...document.querySelectorAll('button, [role="button"]')]
+        .find((e) => /^(usar aquí|use here)$/i.test((e.innerText || e.textContent || '').trim()));
+      if (!boton) return false;
+      boton.click();
+      return true;
+    }),
+    pausa(3000).then(() => false)
+  ]).catch(() => false);
+}
+
 // Antes de crear un cliente: Chromium huerfano, cache y locks.
 async function prepararArranque(log) {
   const huerfanos = await chromiumDelPerfil(true);
@@ -181,6 +199,7 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
     // ERR_ABORTED = la propia pagina cancela una peticion (miniaturas, etc.): normal, no es un fallo
     const alFallar = (r) => { pendientes.delete(r); const e = (r.failure() && r.failure().errorText) || '?'; if (e !== 'net::ERR_ABORTED') limitada(`Petición fallida: ${e} ${host(r.url())}`); };
     const alErrorPagina = (e) => limitada('Error en la página: ' + String(e.message).slice(0, 120));
+    let tomas = 0, siguienteToma = 0;
     try {
     while (!descartado && !listo && seg() < timeoutMs / 1000) {
       if (!navegador && c.pupBrowser) { navegador = true; nota('Chromium lanzado'); }
@@ -191,6 +210,13 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
         pagina.on('requestfinished', alTerminar);
         pagina.on('requestfailed', alFallar);
         pagina.on('pageerror', alErrorPagina);
+      }
+      if (pagina && tomas < 3 && Date.now() >= siguienteToma) {
+        siguienteToma = Date.now() + 3000;
+        if (await pulsarUsarAqui(pagina)) {
+          tomas++;
+          log('aviso', 'WhatsApp estaba abierto en otra ventana con esta misma sesión: la aplicación ha tomado el control («Usar aquí»). Si hay otra copia de la aplicación abierta (en otro ordenador o en otra carpeta), ciérrala: si no, se quitarán la sesión una a otra.', true);
+        }
       }
       if (!informado && seg() >= 45) {
         informado = true;
@@ -274,4 +300,4 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
   return motor;
 }
 
-module.exports = { nombre: 'wwebjs', sesionGuardada, prepararArranque, diagnostico, crear, sondaPagina };
+module.exports = { nombre: 'wwebjs', sesionGuardada, prepararArranque, diagnostico, crear, sondaPagina, pulsarUsarAqui };

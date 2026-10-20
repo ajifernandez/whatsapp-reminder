@@ -3,7 +3,7 @@
 // Uso: npm test
 const fs = require('fs');
 const assert = require('assert');
-const { sondaPagina } = require('../motores/wwebjs');
+const { sondaPagina, pulsarUsarAqui } = require('../motores/wwebjs');
 
 const ok = (n) => console.log('OK  ' + n);
 
@@ -53,6 +53,20 @@ const ok = (n) => console.log('OK  ' + n);
     assert.deepEqual(bloqueada, { sinRespuesta6s: true });
     assert.ok(Date.now() - t0 < 7500, 'responde en ~6 s aunque la página siga bloqueada');
     ok('foto: con la página bloqueada devuelve «sin respuesta en 6 s» en vez de colgarse');
+
+    // «Usar aquí»: la app lo pulsa sola (en español y en inglés); sin el botón no toca nada
+    for (const texto of ['Usar aquí', 'Use here']) {
+      await pagina.goto('about:blank');
+      await pagina.setContent(`<p>WhatsApp está abierto en otra ventana.</p><button onclick="window.pulsado = true"><div>  ${texto}  </div></button><button onclick="window.otro = true">Cerrar</button>`);
+      assert.equal(await pulsarUsarAqui(pagina), true, texto);
+      assert.equal(await pagina.evaluate(() => window.pulsado === true && !window.otro), true, 'pulsa ese botón y no otro');
+    }
+    await pagina.goto('about:blank');
+    await pagina.setContent('<button onclick="window.pulsado = true">Usar aquí otra vez</button><div role="button">Conectar</div>');
+    assert.equal(await pulsarUsarAqui(pagina), false, 'solo el texto exacto');
+    assert.equal(await pagina.evaluate(() => window.pulsado === true), false);
+    assert.equal(await pulsarUsarAqui(null), false);
+    ok('«Usar aquí»: lo pulsa sola (español e inglés), solo ese botón y solo con el texto exacto');
 
     assert.deepEqual(await sondaPagina(null), { pagina: false });
     console.log('\nTODAS LAS PRUEBAS DE LA FOTO DE LA PÁGINA PASAN');
