@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/update.test.js"
+    "test": "node test/update.test.js && node test/servidor.test.js"
   },
   "keywords": [
     "whatsapp",
@@ -24,6 +24,7 @@
   "archivosActualizables": [
     "server.js",
     "update.js",
+    "motores/wwebjs.js",
     "package.json",
     "README.md",
     "MANUAL_USUARIO.md",

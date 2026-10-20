@@ -22,9 +22,10 @@ prepare_portable_dist:
 	@node -c server.js
 	@echo ">> Copiando ficheros de codigo..."
 	@cp -f $(SYNC_FILES) "$(PORTABLE_DIR)/"
-	@echo ">> Sincronizando renderer/ y vendor/..."
+	@echo ">> Sincronizando renderer/, vendor/ y motores/..."
 	@rsync -a --delete renderer/ "$(PORTABLE_DIR)/renderer/"
 	@rsync -a --delete vendor/   "$(PORTABLE_DIR)/vendor/"
+	@rsync -a --delete motores/  "$(PORTABLE_DIR)/motores/"
 	@$(MAKE) --no-print-directory clean_portable_runtime
 	@echo ">> Regenerando ZIP..."
 	@rm -f "$(ZIP)"
