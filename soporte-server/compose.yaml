@@ -1,20 +1,26 @@
-# Pegar en Dockge (nuevo stack "soporte"). No hace falta copiar ficheros ni construir:
-# al arrancar descarga server.js desde GitHub (rama main).
+# Pegar en Dockge (nuevo stack "soporte"). La imagen se construye desde git: no hace falta copiar
+# ficheros ni depende de la cache de GitHub.
+#
+#   - "Actualizar" (Update) en Dockge = reconstruir desde git y recrear el contenedor con la ultima version.
+#     (pull_policy: build hace que `up` reconstruya; sin eso, Dockge reutilizaria la imagen vieja.)
+#   - "Reiniciar" (Restart) solo reinicia el contenedor, sin reconstruir.
+#   - Para fijar una version concreta: cambia #main por un tag, p. ej. #v2.4.0
+#
 # Despues, publicarlo con HTTPS (Nginx Proxy Manager) hacia el puerto 3100 de este host.
 services:
   soporte:
-    image: node:22-alpine
+    build: https://github.com/ajifernandez/whatsapp-reminder.git#main:soporte-server
+    pull_policy: build
     restart: unless-stopped
-    working_dir: /app
-    command: sh -c "wget -qO server.js https://raw.githubusercontent.com/ajifernandez/whatsapp-reminder/main/soporte-server/server.js && exec node server.js"
     ports:
       - "3100:3000"
     environment:
       DATA_DIR: /data
       ADMIN_USER: admin
-      ADMIN_PASS: cambia-esto   # contraseña de la interfaz web (GET /); sin ella queda desactivada
+      ADMIN_PASS: cambia-esto   # contraseña de la interfaz web; sin ella queda desactivada
       # NTFY_URL: https://ntfy.tudominio/diagnosticos   # opcional: aviso push
       # OFFLINE_MIN: 12   # minutos sin latidos para marcar una clínica como «Sin señal»
+      # REFRESCO_S: 5     # cada cuántos segundos se actualiza la página de clínicas
     volumes:
       - soporte-data:/data
 
