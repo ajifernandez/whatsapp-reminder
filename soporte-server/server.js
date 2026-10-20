@@ -11,15 +11,7 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || '/data';
-const NTFY_URL = process.env.NTFY_URL || ''; // opcional: https://ntfy.tudominio/tema (diagnósticos y cambios de estado de clínicas)
-// Estados que merecen aviso push cuando una clínica entra en ellos
-const ESTADOS_AVISO = new Set(['desconectado', 'warning']);
-
-// Aviso push por ntfy (si NTFY_URL está definido). Nunca bloquea ni rompe la petición.
-function avisarPush(titulo, cuerpo, prioridad = 'default') {
-  if (!NTFY_URL) return;
-  fetch(NTFY_URL, { method: 'POST', headers: { Title: titulo.slice(0, 120), Priority: prioridad }, body: cuerpo.slice(0, 400) }).catch(() => {});
-}
+const NTFY_URL = process.env.NTFY_URL || ''; // opcional: https://ntfy.tudominio/tema
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || '';
 const ZONA = process.env.TZ || 'Europe/Madrid';
@@ -236,20 +228,10 @@ function registrarLatido(l, ip) {
   const esNueva = !c.ultimo; // primer latido: no hay estado anterior real que comparar
   if (!esNueva) { c.dias ||= {}; acumular(c.dias, c.estado, c.ultimo, ahora); podarDias(c.dias); }
   const cambio = c.estado !== l.estado;
-  const estadoAnterior = esNueva ? null : estadoVisible(c, ahora);
   Object.assign(c, l, { ip, ultimo: ahora });
   if (cambio) {
     c.desdeEstado = ahora;
     c.cambios = [...c.cambios, { t: ahora, estado: l.estado }].slice(-20);
-  }
-  // Aviso solo al ENTRAR en un estado malo (no en cada latido) y solo si antes estaba bien
-  const estadoNuevo = estadoVisible(c, ahora);
-  if (!esNueva && estadoNuevo !== estadoAnterior && ESTADOS_AVISO.has(estadoNuevo) && !['offline', 'desconectado'].includes(estadoAnterior)) {
-    avisarPush(`${ETIQUETA[estadoNuevo]}: ${c.alias || c.host}`, detalle(c, estadoNuevo, ahora), estadoNuevo === 'desconectado' ? 'high' : 'default');
-  }
-  // y uno al RECUPERARSE de un estado malo
-  if (!esNueva && estadoNuevo === 'ok' && ['warning', 'desconectado', 'offline'].includes(estadoAnterior)) {
-    avisarPush(`Recuperada: ${c.alias || c.host}`, `Vuelve a estar OK (estaba ${ETIQUETA[estadoAnterior].toLowerCase()}).`, 'low');
   }
   guardarClinicas();
   return true;
