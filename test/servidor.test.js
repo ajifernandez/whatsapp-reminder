@@ -31,8 +31,17 @@ async function arrancar() {
     }
     throw new Error('no se llego al estado ' + estado);
   };
-  const cerrar = () => { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); };
-  return { dir, api, esperarEstado, cerrar, orden: (o) => fs.writeFileSync(path.join(dir, 'orden.txt'), o) };
+  const cerrar = async () => {
+    proc.kill();
+    await pausa(300); // en Windows el proceso tarda en soltar los ficheros
+    // primero el enlace (junction en Windows), para no borrar nunca el node_modules real
+    const enlace = path.join(dir, 'node_modules');
+    try { fs.unlinkSync(enlace); } catch (_) { try { fs.rmdirSync(enlace); } catch (_) { /* ya no está */ } }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* temporal: no es grave */ }
+  };
+  const salida = new Promise((r, rechazar) => { proc.on('exit', r); setTimeout(() => rechazar(new Error('el proceso no se cerró')), 15000).unref(); });
+  salida.catch(() => {});
+  return { dir, base, api, esperarEstado, cerrar, salida, orden: (o) => fs.writeFileSync(path.join(dir, 'orden.txt'), o) };
 }
 
 const ok = (n) => console.log('OK  ' + n);
@@ -61,7 +70,16 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     s.orden('desconectar');
     await s.esperarEstado('desconectado');
     ok('evento desconectado -> estado desconectado');
-  } finally { s.cerrar(); }
+
+    const mal = await fetch(s.base + '/api/motor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"motor":"nada"}' });
+    assert.equal(mal.status, 400);
+    const cambio = await s.api('/api/motor', { motor: 'wwebjs' });
+    assert.equal(cambio.motor, 'wwebjs');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motor, 'wwebjs');
+    await s.esperarEstado('conectado'); // con sesión guardada reconecta sin esperar el cooldown
+    assert.ok(Array.isArray((await s.api('/api/estado')).motores));
+    ok('cambio de motor: valida, se guarda en config.json y reconecta');
+  } finally { await s.cerrar(); }
 
   s = await arrancar();
   try {
@@ -76,7 +94,20 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     await s.esperarEstado('desconectado');
     assert.ok(fs.readFileSync(path.join(s.dir, 'enviados.log'), 'utf8').includes('cerrarSesion'));
     ok('cerrar sesion llama al motor y deja el estado desconectado');
-  } finally { s.cerrar(); }
+  } finally { await s.cerrar(); }
+
+  s = await arrancar();
+  try {
+    await s.esperarEstado('conectado');
+    const ajeno = await fetch(s.base + '/api/apagar', { method: 'POST', headers: { Origin: 'https://otra-web.example' } });
+    assert.equal(ajeno.status, 403);
+    assert.equal((await s.api('/api/estado')).estado, 'conectado', 'sigue en marcha');
+    const propio = await fetch(s.base + '/api/apagar', { method: 'POST', headers: { Origin: s.base } });
+    assert.equal(propio.status, 200);
+    await s.salida;
+    assert.match(fs.readFileSync(path.join(s.dir, 'data', 'app.log'), 'utf8'), /Aplicación cerrada \(botón Apagar/);
+    ok('apagar: rechaza otro origen; desde la página cierra el proceso y lo registra');
+  } finally { await s.cerrar(); }
 
   console.log('\nTODAS LAS PRUEBAS DEL SERVIDOR PASAN');
 })().catch((e) => { console.error('FALLO:', e); process.exit(1); });

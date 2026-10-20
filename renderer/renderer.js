@@ -21,6 +21,13 @@ const api = {
   }).then((r) => r.json()),
   conectar: () => fetch('/api/conectar', { method: 'POST' }),
   cerrarSesion: () => fetch('/api/cerrar', { method: 'POST' }),
+  cambiarMotor: (motor) => fetch('/api/motor', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motor })
+  }).then(async (r) => {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo cambiar el motor');
+    return data;
+  }),
   pedirCodigo: (telefono) => fetch('/api/vincular-codigo', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telefono })
   }).then(async (r) => {
@@ -481,6 +488,51 @@ $('btnConectar').addEventListener('click', () => {
 
 $('btnCerrar').addEventListener('click', () => api.cerrarSesion());
 
+// Selector de motor: cada uno tiene su propia vinculación con el móvil.
+let motorActual = null;
+function pintarMotores(actual, motores) {
+  motorActual = actual;
+  $('selMotor').innerHTML = motores.map((m) => `<option value="${m.id}"${m.id === actual ? ' selected' : ''}>${m.nombre}${m.vinculado ? ' · vinculado' : ''}</option>`).join('');
+  // vincular con código: solo el motor Baileys lo admite
+  $('vincularCodigo').classList.toggle('oculto', actual !== 'baileys');
+}
+
+$('selMotor').addEventListener('change', async () => {
+  const sel = $('selMotor');
+  const nuevo = sel.value;
+  const aviso = conectado ? ' Se cortará la conexión actual.' : '';
+  if (!confirm(`¿Cambiar el motor de WhatsApp?${aviso} Si el nuevo motor no está vinculado, habrá que vincular el móvil.`)) {
+    sel.value = motorActual;
+    return;
+  }
+  try {
+    const r = await api.cambiarMotor(nuevo);
+    pintarMotores(r.motor, r.motores);
+    $('qrCaja').classList.add('oculto');
+    toast('Motor cambiado.', 'ok');
+  } catch (err) {
+    sel.value = motorActual;
+    toast(err.message, 'error');
+  }
+});
+
+// Cierre controlado: mejor que cerrar la ventana negra, que puede dejar procesos colgados.
+$('btnApagar').addEventListener('click', async () => {
+  if (!confirm('¿Apagar la aplicación? Mientras esté apagada no se enviarán recordatorios (tampoco los automáticos).')) return;
+  try {
+    const r = await fetch('/api/apagar', { method: 'POST' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'No se pudo apagar');
+    document.querySelector('main').innerHTML = '<section class="tarjeta"><h2>Aplicación apagada</h2>'
+      + '<p>Se ha cerrado correctamente. Ya puedes cerrar esta pestaña.</p>'
+      + '<p>Para volver a usarla, abre <b>Iniciar</b> de nuevo.</p></section>';
+    $('estadoTexto').textContent = 'Apagada';
+    $('estadoPunto').className = 'punto desconectado';
+    for (const b of document.querySelectorAll('header button, header select')) b.disabled = true;
+  } catch (err) {
+    toast('No se pudo apagar: ' + err.message, 'error');
+  }
+});
+
 $('btnCodigo').addEventListener('click', async () => {
   const btn = $('btnCodigo');
   btn.disabled = true;
@@ -843,8 +895,14 @@ function conectarEventos() {
   $('mensajePlantilla').value = config.mensaje;
   $('chkAutoEnvio').checked = !!config.autoEnvio;
   pintarTabla();
-  // vincular con código: solo el motor Baileys lo admite
-  if (estadoInicial.motor === 'baileys') $('vincularCodigo').classList.remove('oculto');
+  pintarMotores(estadoInicial.motor, estadoInicial.motores || []);
+  // al pasar a otro motor (p. ej. la 3.0), su sesión aún no existe: avisar al abrir la página
+  const motores = estadoInicial.motores || [];
+  const actual = motores.find((m) => m.id === estadoInicial.motor);
+  const otro = motores.find((m) => m.vinculado && m.id !== estadoInicial.motor);
+  if (actual && !actual.vinculado && otro && estadoInicial.estado !== 'conectado') {
+    log(`Esta versión usa ${actual.nombre}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»; QR o código). Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`, 'aviso');
+  }
   if (estadoInicial.version) {
     $('versionTexto').textContent = 'v' + estadoInicial.version;
   }

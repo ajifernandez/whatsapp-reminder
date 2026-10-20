@@ -20,6 +20,8 @@ El mensaje que se envía:
 
 ## Para la recepcionista (uso diario)
 
+Para cerrar la aplicación, mejor el botón **⏻ Apagar** de la cabecera que cerrar la ventana negra: cierra WhatsApp de forma ordenada y evita procesos colgados en el siguiente arranque.
+
 1. Doble clic en **Iniciar** (`Iniciar.bat` en Windows, `Iniciar.sh` en Linux).
    Se abre una ventana negra (el servidor, déjala abierta) y el navegador con la app.
 2. Pulsa **Conectar WhatsApp**. La primera vez aparece un QR:
@@ -78,7 +80,7 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 - `motores/` — cómo se habla con WhatsApp (misma interfaz en los dos, ver cabecera de `motores/wwebjs.js`):
   - `baileys.js` — por WebSocket, sin navegador. Vincula con QR o con código. Usa `vendor/baileys.bundle.mjs`.
   - `wwebjs.js` — whatsapp-web.js: Chromium oculto con web.whatsapp.com (el de la 2.x).
-  - Se elige con `"motor": "baileys"` o `"wwebjs"` en `data/config.json`; cambiarlo requiere reiniciar y volver a vincular.
+  - Se elige en la página («Motor», bajo «Conectar WhatsApp») o con `"motor"` en `data/config.json`. Por defecto Baileys. Cada motor tiene su propia vinculación; si el nuevo no está vinculado, la página avisa.
 - `vendor/baileys.bundle.mjs` — Baileys 6.7.24 empaquetado en un fichero (la portable no tiene npm). Se regenera con `npm run build:baileys`. La 7.0 (release candidate) la rechaza WhatsApp a fecha de 2026-10.
 - `update.js` — auto-actualizador desde GitHub (se ejecuta antes de `server.js`).
 - `test/` — `npm test`: updater, motor Baileys y servidor con un motor falso; sin red ni WhatsApp.
