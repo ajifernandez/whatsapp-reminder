@@ -15,7 +15,12 @@ const REINTENTOS_MAX = 5;
 
 const pausa = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
 
-const estadoDiag = { reconexiones: 0, ultimoCierre: null, entrantesNoDescifrados: 0 };
+const estadoDiag = { reconexiones: 0, ultimoCierre: null, entrantesNoDescifrados: 0, reintentosPedidos: 0, reintentosSinMensaje: 0 };
+
+// Mensajes enviados recientes. Si el movil receptor no consigue descifrar uno («Esperando el mensaje…»),
+// pide un reintento y Baileys necesita recuperar el original con getMessage para reenviarlo; sin esto el
+// mensaje queda sin llegar para siempre. Solo en memoria: los reintentos llegan a los pocos segundos.
+const MENSAJES_GUARDADOS = 500;
 
 // libsignal (dentro de Baileys) escribe directamente en consola: mensajes ENTRANTES que no
 // puede descifrar ("Bad MAC", habitual tras vincular; la app solo envía, no le afecta) y los
@@ -66,6 +71,7 @@ const silencio = { level: 'silent', trace() {}, debug() {}, info() {}, warn() {}
 function crear({ log, libreria = null, esperaIdMs = 20000, esperaPingMs = 15000 }) {
   const motor = new EventEmitter();
   let sock = null;
+  const enviados = new Map(); // id del mensaje -> contenido, los ultimos MENSAJES_GUARDADOS
   let descartado = false;
   let listo = false;
   let intentos = 0;
@@ -87,7 +93,16 @@ function crear({ log, libreria = null, esperaIdMs = 20000, esperaPingMs = 15000 
       markOnlineOnConnect: false, // que el móvil siga recibiendo notificaciones
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false, // no bajar el historial de chats: no lo necesitamos
-      getMessage: async () => undefined
+      // Baileys lo llama cuando el receptor pide reenviar un mensaje nuestro
+      getMessage: async (key) => {
+        const msg = enviados.get(key && key.id);
+        estadoDiag.reintentosPedidos++;
+        if (!msg) estadoDiag.reintentosSinMensaje++;
+        log(msg ? 'info' : 'aviso', msg
+          ? 'WhatsApp pidió reenviar un mensaje (el móvil receptor no pudo descifrarlo a la primera): se reenvía.'
+          : 'WhatsApp pidió reenviar un mensaje que ya no está en memoria: no se puede reenviar.');
+        return msg;
+      }
     });
     const s = sock;
     s.ev.on('creds.update', saveCreds);
@@ -140,7 +155,14 @@ function crear({ log, libreria = null, esperaIdMs = 20000, esperaPingMs = 15000 
     }
     return r && r.exists ? r.jid : null;
   };
-  motor.enviar = (id, texto) => sock.sendMessage(id, { text: texto });
+  motor.enviar = async (id, texto) => {
+    const enviado = await sock.sendMessage(id, { text: texto });
+    if (enviado && enviado.key && enviado.key.id && enviado.message) {
+      enviados.set(enviado.key.id, enviado.message);
+      if (enviados.size > MENSAJES_GUARDADOS) enviados.delete(enviados.keys().next().value);
+    }
+    return enviado;
+  };
 
   // Salud: el mismo ping de protocolo que Baileys manda cada 30 s para mantener la conexion,
   // pero con limite de espera y visible (el suyo falla en silencio).

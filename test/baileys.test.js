@@ -27,7 +27,7 @@ function libreriaFalsa() {
     Browsers: { windows: () => ['Windows', 'Chrome', '10'] },
     fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1] }),
     useMultiFileAuthState: async () => ({ state: {}, saveCreds() {} }),
-    makeWASocket() {
+    makeWASocket(config) {
       const s = { ev: new EventEmitter(), terminado: false, logoutLlamado: false, enviados: [], ws: { isOpen: true }, pings: 0, pingColgado: false };
       s.query = (nodo) => { s.pings++; s.ultimoNodo = nodo; return s.pingColgado ? new Promise(() => {}) : Promise.resolve({}); };
       s.end = () => { s.terminado = true; };
@@ -37,7 +37,8 @@ function libreriaFalsa() {
         if (jid.startsWith('888')) return new Promise(() => {}); // nunca contesta
         return [{ exists: !jid.startsWith('000'), jid }];
       };
-      s.sendMessage = async (id, m) => s.enviados.push([id, m.text]);
+      s.config = config;
+      s.sendMessage = async (id, m) => { s.enviados.push([id, m.text]); return { key: { id: 'MSG' + s.enviados.length, remoteJid: id }, message: { conversation: m.text } }; };
       sockets.push(s);
       return s;
     }
@@ -76,6 +77,24 @@ const ok = (n) => console.log('OK  ' + n);
   await t.m.enviar('34612345678@s.whatsapp.net', 'hola');
   assert.deepEqual(t.ultimo().enviados, [['34612345678@s.whatsapp.net', 'hola']]);
   ok('idDe: existe -> jid; sin WhatsApp -> null; enviar manda el texto');
+
+  // 2c. reintento: si el receptor no pudo descifrar, Baileys pide el original con getMessage
+  {
+    const antes = await Baileys.diagnostico();
+    const getMessage = t.ultimo().config.getMessage;
+    assert.deepEqual(await getMessage({ id: 'MSG1', remoteJid: '34612345678@s.whatsapp.net' }), { conversation: 'hola' }, 'el mensaje enviado se puede reenviar');
+    assert.equal(await getMessage({ id: 'NO-EXISTE' }), undefined);
+    const despues = await Baileys.diagnostico();
+    assert.equal(despues.reintentosPedidos - antes.reintentosPedidos, 2);
+    assert.equal(despues.reintentosSinMensaje - antes.reintentosSinMensaje, 1);
+    assert.ok(t.logs.some((l) => l.includes('se reenvía')), 'queda anotado');
+    // no crece sin límite: tras 500 envíos más, el primero ya no está
+    for (let i = 0; i < 500; i++) await t.m.enviar('34600000000@s.whatsapp.net', 'x' + i);
+    assert.equal(await getMessage({ id: 'MSG1' }), undefined, 'el más antiguo se descarta');
+    assert.deepEqual(await getMessage({ id: 'MSG501' }), { conversation: 'x499' }, 'el más reciente sigue');
+    t.ultimo().enviados.length = 1; // deja el socket como estaba para las pruebas siguientes
+  }
+  ok('reintento de descifrado: el mensaje enviado se puede reenviar (antes no: «Esperando el mensaje»), con límite de 500 y contado en el diagnóstico');
 
   // 2a. ping: consulta real de protocolo (la misma que el keep-alive de Baileys), con limite
   await t.m.ping();
