@@ -32,6 +32,7 @@ const falso = {
         if (orden === 'fallo_auth') m.emit('fallo_auth', 'PRUEBA');
       }, 50);
     };
+    m.sonda = async () => ({ falso: true, temporizador500ms: 500 });
     m.idDe = async (n) => {
       if (n.endsWith('888')) throw Object.assign(new Error('WhatsApp no responde'), { sinRespuesta: true });
       return n.endsWith('000') ? null : n + '@s.whatsapp.net';

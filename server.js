@@ -450,6 +450,11 @@ async function comprobarSalud() {
     if (salud.fallosSeguidos === 1 || salud.fallosSeguidos % 5 === 0) {
       registrarLog('aviso', `Comprobación de conexión fallida (${salud.fallosSeguidos} seguida${salud.fallosSeguidos > 1 ? 's' : ''}): ${motivo}`);
     }
+    // la primera vez, foto de la pagina (whatsapp-web.js): por que una pagina ya conectada deja de responder
+    if (salud.fallosSeguidos === 1 && typeof c.sonda === 'function') {
+      try { registrarLog('info', 'Foto de la página: ' + JSON.stringify(await c.sonda())); } catch (_) { /* sin foto */ }
+      if (!vigente()) return;
+    }
     // la primera vez (y cada 5 fallos seguidos) se vuelve a averiguar la causa
     if (salud.fallosSeguidos >= FALLOS_PARA_AVISAR && (!salud.degradada || salud.fallosSeguidos % 5 === 0)) {
       const { causa, consejo } = await clasificarCausa(motivo);

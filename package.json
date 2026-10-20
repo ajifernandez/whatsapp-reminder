@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/update.test.js && node test/baileys.test.js && node test/soporte.test.js && node test/servidor.test.js",
+    "test": "node test/update.test.js && node test/baileys.test.js && node test/wwebjs.test.js && node test/soporte.test.js && node test/servidor.test.js",
     "build:baileys": "esbuild scripts/baileys-entrada.mjs --bundle --platform=node --format=esm --target=node20 --minify --legal-comments=eof --external:sharp --external:jimp --external:link-preview-js --external:audio-decode --external:qrcode-terminal \"--banner:js=// Baileys 6.7.24 empaquetado (npm run build:baileys). No editar.\nimport { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);\" --outfile=vendor/baileys.bundle.mjs"
   },
   "keywords": [
