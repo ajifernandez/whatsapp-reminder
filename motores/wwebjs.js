@@ -76,6 +76,41 @@ async function chromiumDelPerfil(matar) {
   } catch (_) { return 0; }
 }
 
+// «Foto» de la pagina de WhatsApp Web para saber POR QUE no arranca o deja de responder. Solo datos
+// tecnicos: el texto de la pagina se usa para comprobar pantallas conocidas y nunca sale de aqui (podria
+// haber chats). Si la pagina no responde en 6 s, eso mismo es el dato (hilo bloqueado o estrangulado).
+async function sondaPagina(pagina) {
+  if (!pagina) return { pagina: false };
+  const foto = await Promise.race([
+    pagina.evaluate(async () => {
+      const t0 = performance.now();
+      await new Promise((r) => setTimeout(r, 500));
+      const texto = ((document.body && document.body.innerText) || '').toLowerCase();
+      const v = window.Debug && window.Debug.VERSION;
+      return {
+        readyState: document.readyState,
+        visibilidad: document.visibilityState,
+        titulo: document.title.replace(/\(\d+\)\s*/g, '').slice(0, 40), // sin el contador de no leidos
+        appWhatsApp: typeof window.Debug !== 'undefined',
+        versionWeb: v ? String(v).split('.').slice(0, 2).join('.') : null,
+        qr: !!document.querySelector('canvas'),
+        pantallas: {
+          usarAqui: /usar aquí|use here/.test(texto),
+          actualizar: /actualiza|update (google )?chrome|navegador no (es )?compatible|browser (is )?not supported/.test(texto),
+          cargando: /cargando|loading/.test(texto),
+          conectando: /conectando|connecting/.test(texto),
+          error: /algo salió mal|something went wrong|vuelve a cargar|reload/.test(texto)
+        },
+        online: navigator.onLine,
+        // un temporizador de 500 ms que tarda mucho mas = la pagina esta estrangulada o bloqueada
+        temporizador500ms: Math.round(performance.now() - t0)
+      };
+    }),
+    pausa(6000).then(() => ({ sinRespuesta6s: true }))
+  ]).catch((e) => ({ error: String(e.message).slice(0, 80) }));
+  return foto;
+}
+
 // Antes de crear un cliente: Chromium huerfano, cache y locks.
 async function prepararArranque(log) {
   const huerfanos = await chromiumDelPerfil(true);
@@ -107,6 +142,8 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
   let descartado = false;
   const c = new Client({
     authStrategy: new LocalAuth({ dataPath: path.resolve(AUTH_PATH) }),
+    // «WhatsApp está abierto en otra ventana · Usar aquí»: tomar el control en vez de quedarse esperando
+    takeoverOnConflict: true,
     webVersionCache: { type: 'none' },
     puppeteer: {
       headless: true,
@@ -159,12 +196,7 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
         informado = true;
         const hosts = [...new Set(pendientes.values())].slice(0, 8).join(', ');
         nota(`Sin conectar: ${pendientes.size} peticiones pendientes${hosts ? ': ' + hosts : ''}; navegador=${navegador}, página=${!!pagina}${pagina ? ', url=' + host(pagina.url()) : ''}`);
-        if (pagina) {
-          try {
-            const estado = await Promise.race([pagina.evaluate(() => document.readyState), pausa(3000)]);
-            nota('Estado de la página: ' + (estado || 'sin respuesta en 3 s'));
-          } catch (e) { nota('Estado de la página: error ' + String(e.message).slice(0, 80)); }
-        }
+        if (pagina) nota('Foto de la página: ' + JSON.stringify(await sondaPagina(pagina)));
       }
       await pausa(100);
     }
@@ -203,6 +235,8 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
 
   // Salud: getState() se evalua DENTRO de la pagina, asi que si esta colgada (el fallo de la
   // clinica: 'conectado' con la pagina muerta) no contesta y vence.
+  motor.sonda = () => sondaPagina(c.pupPage);
+
   motor.ping = async () => {
     const estado = await conLimite(c.getState(), esperaPingMs);
     if (estado !== 'CONNECTED') {
@@ -240,4 +274,4 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
   return motor;
 }
 
-module.exports = { nombre: 'wwebjs', sesionGuardada, prepararArranque, diagnostico, crear };
+module.exports = { nombre: 'wwebjs', sesionGuardada, prepararArranque, diagnostico, crear, sondaPagina };

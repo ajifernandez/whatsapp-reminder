@@ -157,6 +157,7 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
       let diag = await s.api('/api/diagnostico');
       assert.ok(diag.log.some((l) => l.includes('Conexión con WhatsApp con problemas')));
       assert.ok(diag.log.some((l) => l.includes('Comprobación de conexión fallida (1 seguida)')), 'el primer fallo suelto también queda en el log del informe');
+      assert.ok(diag.log.some((l) => l.includes('Foto de la página: {"falso":true')), 'en el primer fallo, foto de la página');
       assert.equal(diag.salud.degradada, true);
       assert.ok(diag.salud.comprobaciones >= 3 && diag.salud.fallos >= 2, 'contadores desde el arranque');
       assert.equal(diag.salud.incidentes.length, 1);
