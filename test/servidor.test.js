@@ -23,7 +23,7 @@ async function arrancar({ sesionWwebjs = false, env = {}, saludPrevia = null } =
   fs.symlinkSync(path.join(RAIZ, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   const puerto = 3900 + Math.floor(Math.random() * 90);
   const proc = spawn(process.execPath, ['-r', path.join(__dirname, 'motor-falso.js'), 'server.js'], {
-    cwd: dir, env: { ...process.env, PORT: String(puerto), FALSO_DIR: dir, FALSO_SESION: '1', DIAG_URL: '', ...env }, stdio: 'ignore'
+    cwd: dir, env: { ...process.env, PORT: String(puerto), FALSO_DIR: dir, FALSO_SESION: '1', DIAG_URL: '', LATIDO_URL: '', ...env }, stdio: 'ignore'
   });
   const base = `http://localhost:${puerto}`;
   const api = async (ruta, cuerpo) => (await fetch(base + ruta, cuerpo === undefined ? {} : {
@@ -178,6 +178,53 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     assert.equal(inc[0].causa, 'Sin internet');
     ok('el historial de incidentes sobrevive a los reinicios (uno abierto se marca «reinicio de la aplicación»)');
   } finally { await s.cerrar(); }
+
+  // latido hacia soporte: la app avisa de su estado a un receptor real
+  const dirReceptor = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-receptor-'));
+  const puertoRec = 3700 + Math.floor(Math.random() * 90);
+  const receptor = spawn(process.execPath, [path.join(RAIZ, 'soporte-server', 'server.js')], { env: { ...process.env, PORT: String(puertoRec), DATA_DIR: dirReceptor, ADMIN_PASS: 'x' }, stdio: 'ignore' });
+  const clinicasEnRecepcion = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(dirReceptor, 'estado', 'clinicas.json'), 'utf8'))); } catch (_) { return []; } };
+  const esperarClinica = async (cond, ms = 9000) => {
+    for (let t = 0; t < ms; t += 100) { const c = clinicasEnRecepcion()[0]; if (c && cond(c)) return c; await pausa(100); }
+    throw new Error('el receptor no recibió el latido esperado: ' + JSON.stringify(clinicasEnRecepcion()[0]));
+  };
+  await pausa(600);
+  s = await arrancar({ env: { LATIDO_URL: `http://localhost:${puertoRec}/latido`, INTERVALO_LATIDO_MS: '300', INTERVALO_SALUD_MS: '150', SALUD_RED: 'ok' } });
+  try {
+    await s.esperarEstado('conectado');
+    const c = await esperarClinica((x) => x.estado === 'conectado');
+    assert.equal(c.motor, 'falso');
+    assert.equal(c.host, os.hostname());
+    assert.match(c.id, /^[a-f0-9-]{36}$/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'instalacion.json'), 'utf8')).id, c.id, 'el id se guarda para los siguientes arranques');
+    assert.equal((await s.api('/api/diagnostico')).latido.id, c.id, 'el informe lleva el mismo id');
+    ok('latido: llega al receptor con id estable, equipo, motor y estado');
+
+    fs.writeFileSync(path.join(s.dir, 'ping_falla'), '');
+    const d = await esperarClinica((x) => x.estado === 'degradado');
+    assert.match(d.causa, /La red funciona pero WhatsApp no responde/);
+    fs.rmSync(path.join(s.dir, 'ping_falla'));
+    await esperarClinica((x) => x.estado === 'conectado');
+    ok('latido: al cambiar de estado (con problemas y recuperación) llega enseguida');
+
+    // la clinica puede desactivarlo
+    await s.api('/api/config', { latido: false });
+    await pausa(500);
+    const antes = clinicasEnRecepcion()[0].ultimo;
+    await pausa(1200);
+    assert.equal(clinicasEnRecepcion()[0].ultimo, antes, 'desactivado: no llegan más latidos');
+    assert.equal((await s.api('/api/diagnostico')).latido.activo, false);
+    await s.api('/api/config', { latido: true });
+    await esperarClinica((x) => x.ultimo > antes);
+    ok('latido: se puede desactivar desde la configuración (y reactivar)');
+
+    // al apagar con el boton, un ultimo aviso: "apagada" (a proposito), no una caida
+    const apagar = await fetch(s.base + '/api/apagar', { method: 'POST', headers: { Origin: s.base } });
+    assert.equal(apagar.status, 200);
+    await s.salida;
+    assert.equal(clinicasEnRecepcion()[0].estado, 'apagada');
+    ok('latido: al apagar con «Apagar» llega un último aviso «apagada»');
+  } finally { await s.cerrar(); receptor.kill(); await pausa(200); fs.rmSync(dirReceptor, { recursive: true, force: true }); }
 
   // envio automatico: cita en las proximas horas con WhatsApp sin responder -> sin marcar y en pausa
   s = await arrancar({ env: { INTERVALO_AUTO_MS: '200' } });

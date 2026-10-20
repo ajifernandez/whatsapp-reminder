@@ -93,7 +93,7 @@ function guardarCitas(citas) {
 }
 
 function leerConfig() {
-  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: motorPorDefecto() };
+  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: motorPorDefecto(), latido: true };
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(configBase, null, 2), 'utf8');
     return configBase;
@@ -104,7 +104,8 @@ function leerConfig() {
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
       autoEnvio: datos.autoEnvio === true,
-      motor: Object.hasOwn(MOTORES, datos.motor) ? datos.motor : motorPorDefecto()
+      motor: Object.hasOwn(MOTORES, datos.motor) ? datos.motor : motorPorDefecto(),
+      latido: datos.latido !== false // avisar a soporte del estado: activado salvo que se desactive
     };
   } catch (_) {
     return configBase;
@@ -116,7 +117,8 @@ function guardarConfig(config) {
   const mensaje = typeof config?.mensaje === 'string' && config.mensaje.trim() ? config.mensaje : actual.mensaje;
   const autoEnvio = typeof config?.autoEnvio === 'boolean' ? config.autoEnvio : actual.autoEnvio;
   const motor = Object.hasOwn(MOTORES, config?.motor) ? config.motor : actual.motor;
-  const nuevo = { ...actual, mensaje, autoEnvio, motor };
+  const latido = typeof config?.latido === 'boolean' ? config.latido : actual.latido;
+  const nuevo = { ...actual, mensaje, autoEnvio, motor, latido };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nuevo, null, 2), 'utf8');
   return nuevo;
 }
@@ -126,6 +128,7 @@ function emitir(evento, datos) {
   if (evento === 'log' && datos && typeof datos === 'object') {
     registrarLog(datos.tipo || 'info', String(datos.texto ?? ''));
   }
+  if (evento === 'estado') programarLatido(); // soporte ve los cambios de estado enseguida
   const linea = `event: ${evento}\ndata: ${JSON.stringify(datos)}\n\n`;
   for (const res of sseClients) {
     try { res.write(linea); } catch (_) { /* ignorar */ }
@@ -736,6 +739,52 @@ const sinUsuario = (ruta) => (ruta == null ? ruta : String(ruta).replace(sinUsua
 // Receptor de diagnosticos (ver soporte-server/). Si falla o esta vacio, la UI cae a descarga + correo.
 const DIAG_URL = process.env.DIAG_URL || 'https://soporte.familia-jimenez.es/diagnostico';
 
+// ---------- Latido hacia soporte: estado de esta instalacion (sin datos de pacientes) ----------
+// Cada INTERVALO_LATIDO_MS y al cambiar de estado, la app avisa a soporte de como esta, para ver en
+// la web de soporte que clinicas funcionan sin esperar a que manden un diagnostico. Lleva: id de
+// instalacion (aleatorio), nombre del equipo, version, motor, estado y causa. Se desactiva desde la
+// pagina (config.latido). LATIDO_URL vacio = desactivado (pruebas).
+const LATIDO_URL = process.env.LATIDO_URL !== undefined ? process.env.LATIDO_URL : DIAG_URL.replace(/\/diagnostico$/, '/latido');
+const INTERVALO_LATIDO_MS = Number(process.env.INTERVALO_LATIDO_MS) || 5 * 60 * 1000;
+const INSTALACION_PATH = path.join(DATA_DIR, 'instalacion.json');
+let idCache = null;
+let latidoFalla = false;
+let latidoTimer = null;
+
+function idInstalacion() {
+  if (idCache) return idCache;
+  try {
+    const id = JSON.parse(fs.readFileSync(INSTALACION_PATH, 'utf8')).id;
+    if (/^[a-f0-9-]{16,40}$/.test(id)) return (idCache = id);
+  } catch (_) { /* primera vez */ }
+  idCache = require('crypto').randomUUID();
+  try { fs.writeFileSync(INSTALACION_PATH, JSON.stringify({ id: idCache, creada: new Date().toISOString() })); } catch (_) { /* se usa el de memoria */ }
+  return idCache;
+}
+
+async function enviarLatido(estado) {
+  if (!LATIDO_URL || !leerConfig().latido) return;
+  try {
+    const r = await fetch(LATIDO_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+      body: JSON.stringify({
+        id: idInstalacion(), host: require('os').hostname(), version: updater.versionLocal(), canal: updater.canal(),
+        motor: Motor && Motor.nombre, estado: estado || estadoActual(), causa: salud.causa,
+        ultimoError: ultimoError ? anonimizar(ultimoError).slice(0, 200) : null, ultimoOk: salud.ultimoOk,
+        arranqueHaceSeg: Math.round(process.uptime())
+      })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (latidoFalla) { latidoFalla = false; registrarLog('info', 'Vuelve a llegar a soporte el aviso de estado.'); }
+  } catch (err) {
+    // sin molestar: una sola linea en el log hasta que vuelva a funcionar
+    if (!latidoFalla) { latidoFalla = true; registrarLog('aviso', `No se pudo avisar del estado a soporte (${err.message}); se reintenta sin avisar más.`); }
+  }
+}
+function programarLatido() { clearTimeout(latidoTimer); latidoTimer = setTimeout(() => enviarLatido(), 3000); } // agrupa cambios seguidos
+setInterval(() => enviarLatido(), INTERVALO_LATIDO_MS);
+setTimeout(() => enviarLatido(), 8000); // primer aviso al arrancar
+
 // Si Node llega a WhatsApp Web pero Chromium no, el bloqueo es del navegador (antivirus,
 // cortafuegos del chrome.exe, proxy del sistema); si Node tampoco, es la red.
 async function pruebaRed() {
@@ -776,6 +825,7 @@ async function informeDiagnostico() {
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
     citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(),
+    latido: { activo: Boolean(LATIDO_URL) && leerConfig().latido, id: idInstalacion(), fallando: latidoFalla },
     ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
     redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
     log: log.map(anonimizar)
@@ -958,6 +1008,7 @@ async function apagar(motivo) {
   if (cerrando) return;
   cerrando = true;
   cerrarIncidente('aplicación cerrada'); // sin emitir: la pagina se cierra
+  await Promise.race([enviarLatido('apagada'), pausa(2500)]); // soporte sabe que fue a proposito, no una caida
   console.log(`\nCerrando de forma segura (${motivo})...`);
   registrarLog('info', `Aplicación cerrada (${motivo}).`);
   setTimeout(() => process.exit(0), 10000).unref(); // si algo se cuelga al cerrar, se sale igual

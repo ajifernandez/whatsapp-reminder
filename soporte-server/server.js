@@ -1,6 +1,9 @@
 // Receptor de diagnosticos de las clinicas. Sin dependencias (Node 18+).
 // POST /diagnostico  (JSON)  -> guarda DATA_DIR/<fecha>_<host>.json y avisa a NTFY_URL si existe.
-// GET  /             -> listado web (ver / descargar / borrar). Requiere ADMIN_PASS (Basic auth); sin ella queda desactivado.
+// POST /latido       (JSON)  -> estado de una instalacion (cada pocos minutos y al cambiar de estado).
+// GET  /clinicas     -> estado de cada clinica: ok / con problemas / conectando / desconectado / sin señal / apagada.
+// GET  /diagnosticos -> listado web de informes (ver / descargar / borrar).
+// GET  /             -> lleva a /clinicas. Las paginas requieren ADMIN_PASS (Basic auth); sin ella quedan desactivadas.
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -15,17 +18,37 @@ const ZONA = process.env.TZ || 'Europe/Madrid';
 const MAX_BYTES = 256 * 1024;
 const MAX_POR_HORA = 10; // por IP
 const MAX_FICHEROS = 1000;
+const OFFLINE_MS = (Number(process.env.OFFLINE_MIN) || 12) * 60000; // sin latidos (llegan cada 5 min) = sin señal
+const CONECTANDO_MAX_MS = 10 * 60000; // 'conectando' durante mas de esto ya es un problema
+const MAX_CLINICAS = 500;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
+// Estado de las clinicas: en una subcarpeta, para que no se mezcle con los informes (que son *.json de DATA_DIR)
+const ESTADO_DIR = path.join(DATA_DIR, 'estado');
+fs.mkdirSync(ESTADO_DIR, { recursive: true });
+const CLINICAS_PATH = path.join(ESTADO_DIR, 'clinicas.json');
+let clinicas = (() => { try { return JSON.parse(fs.readFileSync(CLINICAS_PATH, 'utf8')); } catch (_) { return {}; } })();
+const guardarClinicas = () => fs.writeFileSync(CLINICAS_PATH, JSON.stringify(clinicas));
 const visitas = new Map(); // ip -> timestamps; ponytail: en memoria, se pierde al reiniciar
+const visitasLatido = new Map(); // 'ip:..' / 'id:..' -> timestamps
 const fallos = new Map(); // ip -> timestamps de logins fallidos
 
-function limitado(ip) {
+// true si la clave ha superado max peticiones en la ultima hora
+function limitar(mapa, clave, max) {
   const ahora = Date.now();
-  const ts = (visitas.get(ip) || []).filter((t) => ahora - t < 3600e3);
+  const ts = (mapa.get(clave) || []).filter((t) => ahora - t < 3600e3);
   ts.push(ahora);
-  visitas.set(ip, ts);
-  return ts.length > MAX_POR_HORA;
+  mapa.set(clave, ts);
+  return ts.length > max;
+}
+const limitado = (ip) => limitar(visitas, ip, MAX_POR_HORA);
+
+// El Origin, si viene, tiene que ser esta misma pagina (cualquier web abierta en el navegador podria
+// mandar un POST/DELETE con las credenciales ya guardadas)
+function origenPropio(req) {
+  const origen = req.headers.origin;
+  if (!origen) return true;
+  try { return new URL(origen).host === req.headers.host; } catch { return false; }
 }
 
 const iguales = (a, b) => {
@@ -52,6 +75,20 @@ function autorizar(req, res) {
   return false;
 }
 
+const ESTILO = `body{font:14px system-ui;margin:16px;max-width:1100px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #ddd;vertical-align:top}small{color:#666}
+nav{margin-bottom:14px;font-size:15px}nav a{margin-right:14px;color:#2b6cb0;text-decoration:none}nav a.activa{font-weight:700;color:#111;border-bottom:2px solid #2b6cb0}
+.chip{display:inline-block;padding:2px 10px;border-radius:12px;font-weight:600;font-size:13px;white-space:nowrap}
+.ok{background:#dcfce7;color:#166534}.warning{background:#fef3c7;color:#92400e}.conectando{background:#dbeafe;color:#1e40af}
+.desconectado{background:#fee2e2;color:#991b1b}.offline{background:#4b5563;color:#fff}.apagada{background:#e5e7eb;color:#374151}
+.resumen{margin:0 0 14px}.resumen .chip{margin-right:8px}a.accion{font-size:12px;margin-left:8px;color:#2b6cb0}`;
+
+function plantilla(titulo, activa, cuerpo, extra = '') {
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(titulo)}</title><style>${ESTILO}</style>
+<nav><a href="/clinicas"${activa === 'clinicas' ? ' class="activa"' : ''}>Clínicas</a><a href="/diagnosticos"${activa === 'diagnosticos' ? ' class="activa"' : ''}>Diagnósticos</a></nav>
+${cuerpo}${extra}`;
+}
+
 function paginaListado() {
   const todos = fs.readdirSync(DATA_DIR).filter((n) => /^[\w.-]+\.json$/.test(n));
   const kb = Math.round(todos.reduce((t, n) => t + fs.statSync(path.join(DATA_DIR, n)).size, 0) / 1024);
@@ -64,11 +101,8 @@ function paginaListado() {
       + `<td>${esc(d.estado)}${d.ultimoError ? `<br><small>${esc(String(d.ultimoError).slice(0, 80))}</small>` : ''}</td>`
       + `<td><a href="/f/${u}">ver</a> · <a href="/f/${u}?d=1">descargar</a> · <a href="#" data-borrar="${esc(n)}">borrar</a></td></tr>`;
   });
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Diagnósticos</title>
-<style>body{font:14px system-ui;margin:16px;max-width:900px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #ddd;vertical-align:top}small{color:#666}</style>
-<h1>Diagnósticos recibidos (${todos.length}, ${kb} KB)</h1>
-<table><tr><th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th></th></tr>${filas.join('') || '<tr><td colspan=5>Sin informes todavía</td></tr>'}</table>
+  return plantilla('Diagnósticos', 'diagnosticos', `<h1>Diagnósticos recibidos (${todos.length}, ${kb} KB)</h1>
+<table><tr><th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th></th></tr>${filas.join('') || '<tr><td colspan=5>Sin informes todavía</td></tr>'}</table>`, `
 <script>
 document.addEventListener('click', async (e) => {
   const n = e.target.dataset && e.target.dataset.borrar;
@@ -78,7 +112,107 @@ document.addEventListener('click', async (e) => {
   const r = await fetch('/f/' + encodeURIComponent(n), { method: 'DELETE' });
   if (r.ok) location.reload(); else alert('No se pudo borrar (' + r.status + ')');
 });
-</script>`;
+</script>`);
+}
+
+// ---------- Estado de las clinicas ----------
+const ORDEN = { offline: 0, desconectado: 1, warning: 2, conectando: 3, ok: 4, apagada: 5 };
+const ETIQUETA = { ok: 'OK', warning: 'Con problemas', conectando: 'Conectando', desconectado: 'Desconectado', offline: 'Sin señal', apagada: 'Apagada' };
+
+function hace(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return 'ahora';
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `hace ${h} h` : `hace ${Math.round(h / 24)} d`;
+}
+
+// Lo que se muestra: el estado que dijo la app, salvo que haya dejado de dar señales
+function estadoVisible(c, ahora = Date.now()) {
+  if (c.estado === 'apagada') return 'apagada'; // la cerraron ellos: no es una caida
+  if (ahora - c.ultimo > OFFLINE_MS) return 'offline';
+  if (c.estado === 'conectado') return 'ok';
+  if (c.estado === 'degradado') return 'warning';
+  if (c.estado === 'conectando') return ahora - (c.desdeEstado || c.ultimo) > CONECTANDO_MAX_MS ? 'warning' : 'conectando';
+  return 'desconectado'; // desconectado | error
+}
+
+function detalle(c, v, ahora) {
+  if (v === 'offline') return `Sin latidos ${hace(ahora - c.ultimo)}: equipo apagado, sin internet o aplicación cerrada a la fuerza`;
+  if (v === 'warning') return c.estado === 'conectando' ? `Lleva ${hace(ahora - c.desdeEstado).replace('hace ', '')} conectando` : (c.causa || 'Conexión con problemas');
+  if (v === 'desconectado') return c.ultimoError || 'Sin conexión con WhatsApp';
+  if (v === 'apagada') return 'Cerrada con «Apagar»';
+  return '';
+}
+
+function validarLatido(d) {
+  const ESTADOS = ['conectado', 'degradado', 'conectando', 'desconectado', 'error', 'apagada'];
+  const cad = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
+  if (!d || typeof d !== 'object' || typeof d.id !== 'string' || !/^[a-f0-9-]{16,40}$/.test(d.id) || !ESTADOS.includes(d.estado)) return null;
+  return {
+    id: d.id, estado: d.estado, host: cad(d.host, 60), version: cad(d.version, 20), canal: cad(d.canal, 20), motor: cad(d.motor, 20),
+    causa: cad(d.causa, 200), ultimoError: cad(d.ultimoError, 200),
+    ultimoOk: Number.isFinite(d.ultimoOk) ? d.ultimoOk : null, arranqueHaceSeg: Number.isFinite(d.arranqueHaceSeg) ? Math.round(d.arranqueHaceSeg) : null
+  };
+}
+
+// false si ya hay MAX_CLINICAS instalaciones y esta es nueva
+function registrarLatido(l, ip) {
+  const ahora = Date.now();
+  let c = clinicas[l.id];
+  if (!c) {
+    if (Object.keys(clinicas).length >= MAX_CLINICAS) return false;
+    c = clinicas[l.id] = { id: l.id, alias: null, primero: ahora, cambios: [] };
+  }
+  const cambio = c.estado !== l.estado;
+  Object.assign(c, l, { ip, ultimo: ahora });
+  if (cambio) {
+    c.desdeEstado = ahora;
+    c.cambios = [...c.cambios, { t: ahora, estado: l.estado }].slice(-20);
+  }
+  guardarClinicas();
+  return true;
+}
+
+function paginaClinicas() {
+  const ahora = Date.now();
+  const filas = Object.values(clinicas)
+    .map((c) => ({ c, v: estadoVisible(c, ahora) }))
+    .sort((a, b) => ORDEN[a.v] - ORDEN[b.v] || String(a.c.alias || a.c.host).localeCompare(String(b.c.alias || b.c.host)));
+  const cuenta = {};
+  for (const { v } of filas) cuenta[v] = (cuenta[v] || 0) + 1;
+  const resumen = Object.keys(ORDEN).filter((v) => cuenta[v]).map((v) => `<span class="chip ${v}">${cuenta[v]} ${esc(ETIQUETA[v])}</span>`).join('');
+  const html = filas.map(({ c, v }) => `<tr>
+<td><span class="chip ${v}">${esc(ETIQUETA[v])}</span></td>
+<td><b>${esc(c.alias || c.host || 'sin nombre')}</b>${c.alias ? `<br><small>${esc(c.host)}</small>` : ''}<br><small title="${esc(c.id)}">${esc(c.id.slice(0, 8))}</small>
+<a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}">olvidar</a></td>
+<td>${esc(detalle(c, v, ahora))}</td>
+<td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
+<td>${esc(hace(ahora - c.ultimo))}</td>
+<td>${esc(c.desdeEstado ? hace(ahora - c.desdeEstado) : '')}</td>
+<td><small>${esc(c.ip)}</small></td></tr>`);
+  return plantilla('Clínicas', 'clinicas', `<h1>Clínicas (${filas.length})</h1>
+<p class="resumen">${resumen || 'Aún no ha llegado ningún latido.'}</p>
+<table><tr><th>Estado</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=7>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
+<p><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos. Se actualiza sola cada 30 s.</small></p>`, `
+<script>
+document.addEventListener('click', async (e) => {
+  const d = e.target.dataset || {};
+  if (!d.renombrar && !d.olvidar) return;
+  e.preventDefault();
+  let r;
+  if (d.renombrar) {
+    const alias = prompt('Nombre para esta clínica (vacío = usar el del equipo):', d.alias);
+    if (alias === null) return;
+    r = await fetch('/clinicas/' + d.renombrar, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias }) });
+  } else {
+    if (!confirm('¿Olvidar esta instalación? Volverá a aparecer si sigue mandando latidos.')) return;
+    r = await fetch('/clinicas/' + d.olvidar, { method: 'DELETE' });
+  }
+  if (r.ok) location.reload(); else alert('No se pudo (' + r.status + ')');
+});
+setTimeout(() => location.reload(), 30000);
+</script>`);
 }
 
 function podar() {
@@ -88,13 +222,55 @@ function podar() {
 
 const responder = (res, code, texto) => { res.writeHead(code, { 'Content-Type': 'text/plain' }); res.end(texto); };
 
+// Lee un cuerpo JSON de hasta max bytes y llama a alTerminar(objeto); si no, ya ha respondido (413 / 400)
+function leerJson(req, res, max, alTerminar) {
+  let cuerpo = '';
+  let excedido = false;
+  req.on('data', (c) => {
+    cuerpo += c;
+    if (cuerpo.length > max && !excedido) { excedido = true; responder(res, 413, 'demasiado grande'); req.destroy(); }
+  });
+  req.on('end', () => {
+    if (excedido) return;
+    try { alTerminar(JSON.parse(cuerpo)); } catch { responder(res, 400, 'json invalido'); }
+  });
+}
+
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'GET' && url.pathname === '/health') return responder(res, 200, 'ok');
   if (req.method === 'GET' && url.pathname === '/') {
     if (!autorizar(req, res)) return;
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    return res.end(paginaListado());
+    res.writeHead(302, { Location: '/clinicas' });
+    return res.end();
+  }
+  if (req.method === 'GET' && (url.pathname === '/clinicas' || url.pathname === '/diagnosticos')) {
+    if (!autorizar(req, res)) return;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(url.pathname === '/clinicas' ? paginaClinicas() : paginaListado());
+  }
+  if (req.method === 'POST' && url.pathname === '/latido') {
+    if (limitar(visitasLatido, 'ip:' + ipDe(req), 120)) return responder(res, 429, 'demasiadas peticiones');
+    return leerJson(req, res, 4096, (d) => {
+      const l = validarLatido(d);
+      if (!l) return responder(res, 400, 'formato invalido');
+      if (limitar(visitasLatido, 'id:' + l.id, 40)) return responder(res, 429, 'demasiados latidos');
+      if (!registrarLatido(l, ipDe(req))) return responder(res, 429, 'limite de instalaciones');
+      responder(res, 200, 'ok');
+    });
+  }
+  const mc = (req.method === 'POST' || req.method === 'DELETE') && url.pathname.match(/^\/clinicas\/([a-f0-9-]{16,40})$/);
+  if (mc) {
+    if (!origenPropio(req)) return responder(res, 403, 'origen no permitido');
+    if (!autorizar(req, res)) return;
+    const c = clinicas[mc[1]];
+    if (!c) return responder(res, 404, 'no');
+    if (req.method === 'DELETE') { delete clinicas[mc[1]]; guardarClinicas(); return responder(res, 200, 'ok'); }
+    return leerJson(req, res, 1024, (d) => {
+      c.alias = typeof d.alias === 'string' && d.alias.trim() ? d.alias.trim().slice(0, 60) : null;
+      guardarClinicas();
+      responder(res, 200, 'ok');
+    });
   }
   const m = req.method === 'GET' && url.pathname.match(/^\/f\/([\w.-]+\.json)$/);
   if (m) {
@@ -109,8 +285,7 @@ http.createServer((req, res) => {
   const d = req.method === 'DELETE' && url.pathname.match(/^\/f\/([\w.-]+\.json)$/);
   if (d) {
     // DELETE cross-origin ya exige preflight (que no respondemos); el Origin se comprueba ademas por si acaso
-    const origen = req.headers.origin;
-    if (origen && (() => { try { return new URL(origen).host !== req.headers.host; } catch { return true; } })()) return responder(res, 403, 'origen no permitido');
+    if (!origenPropio(req)) return responder(res, 403, 'origen no permitido');
     if (!autorizar(req, res)) return;
     const ruta = path.join(DATA_DIR, path.basename(d[1]));
     if (!fs.existsSync(ruta)) return responder(res, 404, 'no');

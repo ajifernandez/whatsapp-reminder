@@ -125,6 +125,26 @@ No bloquea nada: se puede seguir enviando (los envíos que no reciban respuesta 
 - Registro y `data/app.log`: el paso a «con problemas» (con la causa) y la recuperación. Además, en `app.log` (no en pantalla), el **primer fallo suelto** y cada 5 seguidos: `Comprobación de conexión fallida (N seguidas): motivo`.
 - Diagnóstico, campo `salud`: estado actual, contadores desde el arranque (`comprobaciones`, `fallos`) y los **últimos 10 incidentes** (`desde`, `hasta`, `minutos`, `causa`, `motivo`, `motor` y `fin`: `recuperada`, `desconexión`, `sesión cerrada`, `reconexión`, `cambio de motor`, `aplicación cerrada` o `reinicio de la aplicación`). Se guardan en `data/salud.json`, así que sobreviven a reiniciar la aplicación, que es lo que suele hacerse antes de mandar el informe.
 
+## Estado de las clínicas en remoto (latidos)
+
+Para saber si una clínica funciona **sin que envíe el diagnóstico**, cada aplicación manda un *latido* a `soporte…/latido` al arrancar, cada 5 minutos y al cambiar de estado; y al cerrarla con «⏻ Apagar», un último aviso «apagada». La web de soporte (`/clinicas`, con la contraseña de administración) lista las instalaciones por gravedad:
+
+| Estado | Significa |
+|---|---|
+| **Sin señal** | no llegan latidos desde hace 12 min (equipo apagado, sin internet o aplicación cerrada a la fuerza) |
+| **Desconectado** | la app está en marcha pero sin sesión de WhatsApp (con el último error) |
+| **Con problemas** | conectada pero `ping` fallando (con la causa), o más de 10 min «conectando» |
+| **Conectando** | arrancando o reconectando |
+| **OK** | conectada y respondiendo |
+| **Apagada** | la cerraron a propósito con «Apagar» (no es una caída) |
+
+- **Qué lleva el latido** (nunca datos de pacientes): id de instalación aleatorio (`data/instalacion.json`), nombre del equipo, versión, canal, motor, estado, causa, último error (anonimizado) y último OK. Se ve el IP del equipo en el servidor.
+- **Transparencia y desactivación**: la página tiene la casilla «Avisar a soporte del estado de la conexión (sin datos de pacientes)» (por defecto activada; `latido` en `data/config.json`). Desactivada, la clínica aparecerá como «Sin señal». El informe de diagnóstico incluye `latido` (activo, id).
+- **Nombres**: los equipos suelen llamarse «PC-123»; en la web, «renombrar» pone el de la clínica y «olvidar» borra una instalación (reaparece si sigue avisando). Se guarda en `DATA_DIR/estado/clinicas.json` del receptor.
+- **Receptor**: `POST /latido` valida el formato, limita a 40 latidos/hora por instalación y 120 por IP, y admite como mucho 500 instalaciones. `OFFLINE_MIN` cambia el umbral de «Sin señal». Hay que reiniciar el stack `soporte` en Dockge para que use la versión nueva.
+- La aplicación solo aparece en la lista desde la versión que incluye esta función.
+- Si el receptor no está disponible, la app lo anota **una vez** en `app.log` y sigue sin molestar. Para pruebas, `LATIDO_URL=` (vacío) desactiva los latidos.
+
 ## Diagnóstico de problemas de conexión
 
 Con la app abierta, visitar `http://localhost:PUERTO/api/diagnostico` (mismo puerto que la app). Devuelve versión, estado, último error, SO/Node, RAM libre, si hay sesión vinculada, locks de Chromium y las últimas 80 líneas del log. El botón «✉ Enviar diagnóstico» de la cabecera lo envía desde el servidor al receptor de soporte (`soporte-server/`, ver su `compose.yaml` para Dockge; la interfaz web `/` lista los informes con usuario `ADMIN_USER` y contraseña `ADMIN_PASS`; la URL va en `DIAG_URL` de `server.js`). Si no hay receptor configurado o falla (sin internet), descarga el informe `.json` y abre el correo para adjuntarlo a mano. El log se anonimiza antes: nombres y teléfonos de pacientes salen como `[nombre]` y `[tel]` (función `anonimizar` en `server.js`; si se añaden logs con datos personales, revisarla).
