@@ -3,7 +3,7 @@
 // Uso: npm test
 const fs = require('fs');
 const assert = require('assert');
-const { sondaPagina, pulsarUsarAqui } = require('../motores/wwebjs');
+const { sondaPagina, pulsarUsarAqui, cerrarPestanasDuplicadas } = require('../motores/wwebjs');
 
 const ok = (n) => console.log('OK  ' + n);
 
@@ -67,6 +67,31 @@ const ok = (n) => console.log('OK  ' + n);
     assert.equal(await pagina.evaluate(() => window.pulsado === true), false);
     assert.equal(await pulsarUsarAqui(null), false);
     ok('«Usar aquí»: lo pulsa sola (español e inglés), solo ese botón y solo con el texto exacto');
+
+    // dos pestañas de WhatsApp Web en el mismo navegador (la nuestra y una «restaurada») y una ajena;
+    // web.whatsapp.com se simula interceptando la petición, sin red
+    const abrirWhatsApp = async () => {
+      const p = await navegador.newPage();
+      await p.setRequestInterception(true);
+      p.on('request', (r) => r.respond({ status: 200, contentType: 'text/html', body: '<title>WhatsApp</title><p>WhatsApp</p>' }));
+      await p.goto('https://web.whatsapp.com/');
+      return p;
+    };
+    const propia = await abrirWhatsApp();
+    const restaurada = await abrirWhatsApp();
+    const ajena = await navegador.newPage();
+    let conPestanas = await sondaPagina(propia, navegador);
+    assert.equal(conPestanas.pestanas.whatsapp, 2, 'cuenta las dos de WhatsApp Web');
+    assert.ok(conPestanas.pestanas.total >= 3);
+    assert.equal(await cerrarPestanasDuplicadas(navegador, propia), 1, 'cierra solo la otra de WhatsApp');
+    assert.equal(propia.isClosed(), false, 'la nuestra sigue abierta');
+    assert.equal(restaurada.isClosed(), true);
+    assert.equal(ajena.isClosed(), false, 'las que no son de WhatsApp no se tocan');
+    conPestanas = await sondaPagina(propia, navegador);
+    assert.equal(conPestanas.pestanas.whatsapp, 1);
+    assert.equal(await cerrarPestanasDuplicadas(navegador, propia), 0, 'sin duplicadas no hace nada');
+    assert.equal(await cerrarPestanasDuplicadas(null, propia), 0);
+    ok('pestañas: la foto las cuenta; se cierra la otra de WhatsApp Web, nunca la nuestra ni las ajenas');
 
     assert.deepEqual(await sondaPagina(null), { pagina: false });
     console.log('\nTODAS LAS PRUEBAS DE LA FOTO DE LA PÁGINA PASAN');

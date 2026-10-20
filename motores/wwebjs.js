@@ -79,8 +79,16 @@ async function chromiumDelPerfil(matar) {
 // «Foto» de la pagina de WhatsApp Web para saber POR QUE no arranca o deja de responder. Solo datos
 // tecnicos: el texto de la pagina se usa para comprobar pantallas conocidas y nunca sale de aqui (podria
 // haber chats). Si la pagina no responde en 6 s, eso mismo es el dato (hilo bloqueado o estrangulado).
-async function sondaPagina(pagina) {
+const esWhatsAppWeb = (p) => { try { return new URL(p.url()).host === 'web.whatsapp.com'; } catch (_) { return false; } };
+
+async function sondaPagina(pagina, navegador = null) {
   if (!pagina) return { pagina: false };
+  // pestanas del navegador interno: con dos de WhatsApp Web sale «abierto en otra ventana»
+  let pestanas = null;
+  if (navegador) {
+    const ps = await Promise.race([navegador.pages(), pausa(3000).then(() => null)]).catch(() => null);
+    if (ps) pestanas = { total: ps.length, whatsapp: ps.filter(esWhatsAppWeb).length };
+  }
   const foto = await Promise.race([
     pagina.evaluate(async () => {
       const t0 = performance.now();
@@ -108,7 +116,7 @@ async function sondaPagina(pagina) {
     }),
     pausa(6000).then(() => ({ sinRespuesta6s: true }))
   ]).catch((e) => ({ error: String(e.message).slice(0, 80) }));
-  return foto;
+  return pestanas ? { ...foto, pestanas } : foto;
 }
 
 // «WhatsApp está abierto en otra ventana · Usar aquí»: la MISMA sesion esta abierta en otro sitio (casi
@@ -127,6 +135,21 @@ async function pulsarUsarAqui(pagina) {
     }),
     pausa(3000).then(() => false)
   ]).catch(() => false);
+}
+
+// Otras pestañas de WhatsApp Web en el navegador interno que no son la nuestra (p. ej. restauradas por
+// Chromium tras un cierre brusco): con dos, una muestra «abierto en otra ventana» y la conexion se queda
+// esperando. Se cierran. Devuelve cuantas.
+async function cerrarPestanasDuplicadas(navegador, propia) {
+  if (!navegador) return 0;
+  const ps = await Promise.race([navegador.pages(), pausa(3000).then(() => [])]).catch(() => []);
+  let cerradas = 0;
+  for (const p of ps) {
+    if (p === propia || !esWhatsAppWeb(p)) continue;
+    await p.close().catch(() => {});
+    cerradas++;
+  }
+  return cerradas;
 }
 
 // Antes de crear un cliente: Chromium huerfano, cache y locks.
@@ -213,6 +236,8 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
       }
       if (pagina && tomas < 3 && Date.now() >= siguienteToma) {
         siguienteToma = Date.now() + 3000;
+        const duplicadas = await cerrarPestanasDuplicadas(c.pupBrowser, pagina);
+        if (duplicadas) log('aviso', `Había ${duplicadas} pestaña(s) más de WhatsApp Web abiertas en el navegador interno (seguramente restauradas tras un cierre brusco): se han cerrado.`, true);
         if (await pulsarUsarAqui(pagina)) {
           tomas++;
           log('aviso', 'WhatsApp estaba abierto en otra ventana con esta misma sesión: la aplicación ha tomado el control («Usar aquí»). Si hay otra copia de la aplicación abierta (en otro ordenador o en otra carpeta), ciérrala: si no, se quitarán la sesión una a otra.', true);
@@ -222,7 +247,7 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
         informado = true;
         const hosts = [...new Set(pendientes.values())].slice(0, 8).join(', ');
         nota(`Sin conectar: ${pendientes.size} peticiones pendientes${hosts ? ': ' + hosts : ''}; navegador=${navegador}, página=${!!pagina}${pagina ? ', url=' + host(pagina.url()) : ''}`);
-        if (pagina) nota('Foto de la página: ' + JSON.stringify(await sondaPagina(pagina)));
+        if (pagina) nota('Foto de la página: ' + JSON.stringify(await sondaPagina(pagina, c.pupBrowser)));
       }
       await pausa(100);
     }
@@ -261,7 +286,7 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
 
   // Salud: getState() se evalua DENTRO de la pagina, asi que si esta colgada (el fallo de la
   // clinica: 'conectado' con la pagina muerta) no contesta y vence.
-  motor.sonda = () => sondaPagina(c.pupPage);
+  motor.sonda = () => sondaPagina(c.pupPage, c.pupBrowser);
 
   motor.ping = async () => {
     const estado = await conLimite(c.getState(), esperaPingMs);
@@ -300,4 +325,4 @@ function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
   return motor;
 }
 
-module.exports = { nombre: 'wwebjs', sesionGuardada, prepararArranque, diagnostico, crear, sondaPagina, pulsarUsarAqui };
+module.exports = { nombre: 'wwebjs', sesionGuardada, prepararArranque, diagnostico, crear, sondaPagina, pulsarUsarAqui, cerrarPestanasDuplicadas };
