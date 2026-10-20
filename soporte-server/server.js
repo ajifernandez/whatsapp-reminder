@@ -89,6 +89,8 @@ nav{margin-bottom:14px;font-size:15px}nav a{margin-right:14px;color:#2b6cb0;text
 .chip{display:inline-block;padding:2px 10px;border-radius:12px;font-weight:600;font-size:13px;white-space:nowrap}
 .ok{background:#dcfce7;color:#166534}.warning{background:#fef3c7;color:#92400e}.conectando{background:#dbeafe;color:#1e40af}
 .desconectado{background:#fee2e2;color:#991b1b}.offline{background:#4b5563;color:#fff}.apagada{background:#e5e7eb;color:#374151}
+.dias{display:flex;gap:2px;margin-bottom:2px}.dia{display:inline-block;width:9px;height:20px;border-radius:2px;background:#e5e7eb}
+.d-ok{background:#22c55e}.d-aviso{background:#f59e0b}.d-mal{background:#ef4444}.sd{background:#e5e7eb}
 .historial{margin:4px 0 0;padding-left:18px;font-size:12px;color:#444}.historial li{margin:2px 0}
 .resumen{margin:0 0 14px}.resumen .chip{margin-right:8px}a.accion{font-size:12px;margin-left:8px;color:#2b6cb0}`;
 
@@ -155,6 +157,63 @@ function detalle(c, v, ahora) {
   return '';
 }
 
+// ---------- Disponibilidad por dia ----------
+// Se va sumando cuanto tiempo pasa cada instalacion en cada estado, por dia, para pintar su
+// disponibilidad de los ultimos dias. Entre dos latidos se atribuye el tiempo al estado que dijo el
+// primero, pero solo hasta OFFLINE_MS: lo que pase de ahi cuenta como «sin señal» (o «apagada»).
+const DIAS_GUARDADOS = 30;
+const HORA_MS = 3600e3;
+const bucketDe = (estado) => ({ conectado: 'ok', degradado: 'warning', conectando: 'conectando', apagada: 'apagada' }[estado] || 'desconectado');
+const diaDe = (t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: ZONA }); // AAAA-MM-DD en la zona de soporte
+
+// Suma [desde, hasta) a dias[dia][bucket], troceando por horas para no pasarse de dia
+function repartir(dias, desde, hasta, bucket) {
+  for (let a = desde; a < hasta;) {
+    const fin = Math.min(hasta, (Math.floor(a / HORA_MS) + 1) * HORA_MS);
+    const d = (dias[diaDe(a)] ||= {});
+    d[bucket] = (d[bucket] || 0) + (fin - a);
+    a = fin;
+  }
+}
+function acumular(dias, estado, desde, hasta) {
+  if (!(hasta > desde) || hasta - desde > DIAS_GUARDADOS * 24 * HORA_MS) return;
+  const cubierto = Math.min(hasta - desde, OFFLINE_MS);
+  repartir(dias, desde, desde + cubierto, bucketDe(estado));
+  if (hasta - desde > cubierto) repartir(dias, desde + cubierto, hasta, estado === 'apagada' ? 'apagada' : 'offline');
+}
+function podarDias(dias) {
+  for (const d of Object.keys(dias).sort().slice(0, -DIAS_GUARDADOS)) delete dias[d];
+}
+
+// Disponibilidad = tiempo OK / tiempo observado (sin contar el apagado a proposito)
+function disponibilidad(d) {
+  const total = ['ok', 'warning', 'conectando', 'desconectado', 'offline'].reduce((t, k) => t + (d[k] || 0), 0);
+  return total ? (d.ok || 0) / total : null;
+}
+const horasMin = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+
+// Los ultimos 14 dias como casillas de color, con el detalle al pasar el raton
+function graficaDias(c, ahora) {
+  const dias = JSON.parse(JSON.stringify(c.dias || {}));
+  if (c.ultimo) acumular(dias, c.estado, c.ultimo, ahora); // el tramo abierto hasta este momento
+  const casillas = [];
+  let okTotal = 0, obsTotal = 0;
+  for (let i = 13; i >= 0; i--) {
+    const dia = diaDe(ahora - i * 24 * HORA_MS);
+    const d = dias[dia] || {};
+    const pct = disponibilidad(d);
+    const obs = ['ok', 'warning', 'conectando', 'desconectado', 'offline'].reduce((t, k) => t + (d[k] || 0), 0);
+    okTotal += d.ok || 0; obsTotal += obs;
+    const clase = pct === null ? 'sd' : pct >= 0.99 ? 'd-ok' : pct >= 0.9 ? 'd-aviso' : 'd-mal';
+    const detalle = pct === null ? 'sin datos' : `${(pct * 100).toFixed(1).replace('.', ',')} % disponible · OK ${horasMin(d.ok || 0)}`
+      + [['warning', 'con problemas'], ['desconectado', 'desconectada'], ['conectando', 'conectando'], ['offline', 'sin señal'], ['apagada', 'apagada']]
+        .filter(([k]) => d[k]).map(([k, t]) => ` · ${t} ${horasMin(d[k])}`).join('');
+    casillas.push(`<span class="dia ${clase}" title="${esc(dia + ': ' + detalle)}"></span>`);
+  }
+  const resumen = obsTotal ? `${(okTotal / obsTotal * 100).toFixed(1).replace('.', ',')} %` : '—';
+  return `<div class="dias">${casillas.join('')}</div><small>${esc(resumen)} en 14 días</small>`;
+}
+
 function validarLatido(d) {
   const ESTADOS = ['conectado', 'degradado', 'conectando', 'desconectado', 'error', 'apagada'];
   const cad = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
@@ -175,6 +234,7 @@ function registrarLatido(l, ip) {
     c = clinicas[l.id] = { id: l.id, alias: null, primero: ahora, cambios: [] };
   }
   const esNueva = !c.ultimo; // primer latido: no hay estado anterior real que comparar
+  if (!esNueva) { c.dias ||= {}; acumular(c.dias, c.estado, c.ultimo, ahora); podarDias(c.dias); }
   const cambio = c.estado !== l.estado;
   const estadoAnterior = esNueva ? null : estadoVisible(c, ahora);
   Object.assign(c, l, { ip, ultimo: ahora });
@@ -219,10 +279,11 @@ function contenidoClinicas() {
 <td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
 <td>${esc(hace(ahora - c.ultimo))}</td>
 <td>${esc(c.desdeEstado ? hace(ahora - c.desdeEstado) : '')}</td>
+<td>${graficaDias(c, ahora)}</td>
 <td><small>${esc(c.ip)}</small>${historialHtml(c)}</td></tr>`);
   return `<h1>Clínicas (${filas.length})</h1>
 <p class="resumen">${resumen || 'Aún no ha llegado ningún latido.'}</p>
-<table><tr><th>Estado</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=7>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
+<table><tr><th>Estado</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>Últimos 14 días</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=8>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
 <p><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos.</small></p>`;
 }
 
