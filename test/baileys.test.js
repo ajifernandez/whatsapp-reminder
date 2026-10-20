@@ -28,7 +28,8 @@ function libreriaFalsa() {
     fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1] }),
     useMultiFileAuthState: async () => ({ state: {}, saveCreds() {} }),
     makeWASocket() {
-      const s = { ev: new EventEmitter(), terminado: false, logoutLlamado: false, enviados: [] };
+      const s = { ev: new EventEmitter(), terminado: false, logoutLlamado: false, enviados: [], ws: { isOpen: true }, pings: 0, pingColgado: false };
+      s.query = (nodo) => { s.pings++; s.ultimoNodo = nodo; return s.pingColgado ? new Promise(() => {}) : Promise.resolve({}); };
       s.end = () => { s.terminado = true; };
       s.logout = async () => { s.logoutLlamado = true; s.ev.emit('connection.update', cierre(401)); };
       s.onWhatsApp = async (jid) => {
@@ -75,6 +76,17 @@ const ok = (n) => console.log('OK  ' + n);
   await t.m.enviar('34612345678@s.whatsapp.net', 'hola');
   assert.deepEqual(t.ultimo().enviados, [['34612345678@s.whatsapp.net', 'hola']]);
   ok('idDe: existe -> jid; sin WhatsApp -> null; enviar manda el texto');
+
+  // 2a. ping: consulta real de protocolo (la misma que el keep-alive de Baileys), con limite
+  await t.m.ping();
+  assert.equal(t.ultimo().pings, 1);
+  assert.equal(t.ultimo().ultimoNodo.attrs.xmlns, 'w:p');
+  t.ultimo().pingColgado = true;
+  await assert.rejects(t.m.ping(), (e) => e.sinRespuesta === true);
+  t.ultimo().pingColgado = false; t.ultimo().ws.isOpen = false;
+  await assert.rejects(t.m.ping(), (e) => /cerrada/.test(e.motivo));
+  t.ultimo().ws.isOpen = true;
+  ok('ping: responde -> ok; sin contestar -> sinRespuesta; websocket cerrado -> motivo claro');
 
   // 2b. error o silencio de WhatsApp NO es "numero sin WhatsApp": sinRespuesta
   for (const numero of ['999111', '888111']) {

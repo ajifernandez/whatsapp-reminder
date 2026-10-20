@@ -63,7 +63,7 @@ async function diagnostico() {
 const silencio = { level: 'silent', trace() {}, debug() {}, info() {}, warn() {}, error() {}, fatal() {}, child() { return silencio; } };
 
 // libreria: solo para las pruebas (sustituye al bundle)
-function crear({ log, libreria = null, esperaIdMs = 20000 }) {
+function crear({ log, libreria = null, esperaIdMs = 20000, esperaPingMs = 15000 }) {
   const motor = new EventEmitter();
   let sock = null;
   let descartado = false;
@@ -141,6 +141,15 @@ function crear({ log, libreria = null, esperaIdMs = 20000 }) {
     return r && r.exists ? r.jid : null;
   };
   motor.enviar = (id, texto) => sock.sendMessage(id, { text: texto });
+
+  // Salud: el mismo ping de protocolo que Baileys manda cada 30 s para mantener la conexion,
+  // pero con limite de espera y visible (el suyo falla en silencio).
+  motor.ping = async () => {
+    if (!sock || (sock.ws && sock.ws.isOpen === false)) {
+      throw Object.assign(new Error('conexión cerrada'), { motivo: 'la conexión con WhatsApp está cerrada' });
+    }
+    await conLimite(sock.query({ tag: 'iq', attrs: { to: '@s.whatsapp.net', type: 'get', xmlns: 'w:p' }, content: [{ tag: 'ping', attrs: {} }] }), esperaPingMs);
+  };
 
   // Vincular sin cámara: el número del móvil, con prefijo de país, solo dígitos.
   motor.pedirCodigo = async (numero) => {

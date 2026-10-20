@@ -8,7 +8,8 @@
 //     metodos: iniciar() -> rechaza si falla; idDe(numero) -> id | null; enviar(id, texto);
 //              cerrarSesion(); descartar() (sin listeners y con el navegador muerto); apagar()
 //     idDe lanza sinRespuesta() (ver comun.js) si WhatsApp no contesta; null solo si el numero no tiene WhatsApp
-//   opts: { log(tipo, texto, ui), timeoutMs, esperaIdMs }
+//     ping() resuelve si la conexion responde; si no, lanza (sinRespuesta() o un Error con .motivo)
+//   opts: { log(tipo, texto, ui), timeoutMs, esperaIdMs, esperaPingMs }
 const EventEmitter = require('events');
 const path = require('path');
 const fs = require('fs');
@@ -98,7 +99,7 @@ async function diagnostico() {
 // Errores del navegador (pagina colgada, cerrada...): no son "numero sin WhatsApp"
 const ERROR_NAVEGADOR = /timed out|Target closed|Session closed|Protocol error|context was destroyed|detached|disconnected/i;
 
-function crear({ log, timeoutMs, esperaIdMs = 30000 }) {
+function crear({ log, timeoutMs, esperaIdMs = 30000, esperaPingMs = 15000 }) {
   // require diferido: con el motor Baileys no hace falta cargar puppeteer
   const { Client, LocalAuth } = require('whatsapp-web.js');
   const motor = new EventEmitter();
@@ -199,6 +200,15 @@ function crear({ log, timeoutMs, esperaIdMs = 30000 }) {
     return id ? id._serialized : null;
   };
   motor.enviar = (id, texto) => c.sendMessage(id, texto);
+
+  // Salud: getState() se evalua DENTRO de la pagina, asi que si esta colgada (el fallo de la
+  // clinica: 'conectado' con la pagina muerta) no contesta y vence.
+  motor.ping = async () => {
+    const estado = await conLimite(c.getState(), esperaPingMs);
+    if (estado !== 'CONNECTED') {
+      throw Object.assign(new Error('estado ' + estado), { motivo: estado ? `WhatsApp Web en estado ${estado}` : 'WhatsApp Web no ha cargado' });
+    }
+  };
 
   motor.cerrarSesion = async () => {
     try { await c.logout(); } catch (_) { /* ignorar */ }
