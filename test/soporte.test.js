@@ -136,13 +136,17 @@ const dirsTemporales = [];
       await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'conectado' }));
       await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'desconectado', ultimoError: 'Sesión desconectada' }));
       await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'desconectado', ultimoError: 'Sesión desconectada' }));
-      await pausa(400);
+      // se espera (con límite) a que llegue; un tiempo fijo es frágil en ejecutores lentos
+      const esperarAvisos = async (cond, ms = 6000) => { for (let t = 0; t < ms && !cond(); t += 100) await pausa(100); };
+      await esperarAvisos(() => avisos.some((a) => a.titulo.startsWith('Desconectado')));
+      await pausa(800); // y un margen para detectar que NO llegue otro repetido
       const caidas = avisos.filter((a) => a.titulo.startsWith('Desconectado'));
       assert.equal(caidas.length, 1, 'un solo aviso al caer, no uno por latido');
       assert.equal(caidas[0].prioridad, 'high');
       assert.match(caidas[0].titulo, /CLINICA-PUSH/);
       await r2.latido(base(ID9, { host: 'CLINICA-PUSH', estado: 'conectado' }));
-      await pausa(400);
+      await esperarAvisos(() => avisos.some((a) => a.titulo.startsWith('Recuperada')));
+      await pausa(500);
       const rec = avisos.filter((a) => a.titulo.startsWith('Recuperada'));
       assert.equal(rec.length, 1, 'aviso de recuperación');
       assert.equal(rec[0].prioridad, 'low');
@@ -181,6 +185,56 @@ const dirsTemporales = [];
     assert.match(pagina, /<b>CLINICA-OK<\/b>/);
     assert.match(pagina, /CLINICA-CAIDA/);
     ok('el estado de las clínicas sobrevive a reiniciar el receptor');
+  } finally { await r.parar(); }
+
+  // --- disponibilidad por día: datos conocidos precargados (porcentajes, colores y detalle exactos)
+  const dirDisp = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-disp-'));
+  dirsTemporales.push(dirDisp);
+  fs.mkdirSync(path.join(dirDisp, 'estado'), { recursive: true });
+  const diaHace = (n) => new Date(Date.now() - n * 24 * 3600e3).toLocaleDateString('sv-SE', { timeZone: process.env.TZ || 'Europe/Madrid' });
+  const H = 3600e3;
+  fs.writeFileSync(path.join(dirDisp, 'estado', 'clinicas.json'), JSON.stringify({
+    [ID1]: { id: ID1, alias: null, host: 'CLINICA-DISP', estado: 'apagada', ultimo: Date.now(), cambios: [],
+      dias: {
+        [diaHace(3)]: { ok: 24 * H },                                                    // 100 %  -> verde
+        [diaHace(2)]: { ok: 22 * H, warning: 2 * H },                                    // 91,7 % -> ámbar
+        [diaHace(1)]: { ok: 12 * H, offline: 12 * H },                                   // 50 %   -> rojo
+        [diaHace(5)]: { apagada: 24 * H }                                                // solo apagada -> sin datos
+      } }
+  }));
+  r = await arrancar({ dir: dirDisp, env: { OFFLINE_MIN: '60' } });
+  try {
+    const pag = await r.html('/clinicas?parcial=1');
+    const cas = (n) => new RegExp(`<span class="dia ([\\w-]+)" title="${diaHace(n)}: ([^"]*)"`).exec(pag);
+    assert.equal(cas(3)[1], 'd-ok'); assert.match(cas(3)[2], /100,0 % disponible/);
+    assert.equal(cas(2)[1], 'd-aviso'); assert.match(cas(2)[2], /91,7 % disponible.*con problemas 2 h 0 min/);
+    assert.equal(cas(1)[1], 'd-mal'); assert.match(cas(1)[2], /50,0 % disponible.*sin señal 12 h 0 min/);
+    assert.equal(cas(5)[1], 'sd', 'un día solo apagada no cuenta como indisponible'); assert.match(cas(5)[2], /sin datos/);
+    assert.equal(cas(7)[1], 'sd'); // un día sin ningún dato
+    assert.match(pag, /Últimos 14 días/);
+    assert.match(pag, /\d+,\d % en 14 días/, 'resumen de 14 días');
+    ok('disponibilidad: porcentaje, color (verde ≥99 %, ámbar ≥90 %, rojo) y detalle por día; apagada no cuenta como caída');
+  } finally { await r.parar(); }
+
+  // --- disponibilidad por día: acumulación real con latidos y un hueco sin señal
+  r = await arrancar({ env: { OFFLINE_MIN: '0.02' } }); // 1,2 s
+  dirsTemporales.push(r.dir);
+  try {
+    const leer = () => JSON.parse(fs.readFileSync(path.join(r.dir, 'estado', 'clinicas.json'), 'utf8'))[ID1].dias;
+    const hoy = new Date().toLocaleDateString('sv-SE', { timeZone: process.env.TZ || 'Europe/Madrid' });
+    await r.latido(base(ID1, { estado: 'conectado' }));
+    await pausa(600);
+    await r.latido(base(ID1, { estado: 'degradado', causa: 'x' })); // los 600 ms anteriores eran «ok»
+    await pausa(600);
+    await r.latido(base(ID1, { estado: 'conectado' }));              // los 600 ms anteriores eran «con problemas»
+    await pausa(2500);                                              // hueco > 1,2 s
+    await r.latido(base(ID1, { estado: 'conectado' }));
+    const d = leer()[hoy];
+    // ok = 600 ms del primer tramo + 1200 ms del hueco que aún cubre el último latido «conectado»
+    assert.ok(d.ok >= 1500 && d.ok < 2800, 'ok ≈ 600 + 1200 ms: ' + d.ok);
+    assert.ok(d.warning >= 500 && d.warning < 1500, 'con problemas ≈ 600 ms: ' + d.warning);
+    assert.ok(d.offline >= 1000 && d.offline < 2500, 'el hueco más allá de 1,2 s cuenta como sin señal: ' + d.offline);
+    ok('disponibilidad: el tiempo entre latidos se atribuye al estado anterior y el hueco largo cuenta como sin señal');
   } finally { await r.parar(); }
 
   // --- límite por instalación (40 latidos/hora)
