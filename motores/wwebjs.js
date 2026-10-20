@@ -157,6 +157,9 @@ async function prepararArranque(log) {
   const huerfanos = await chromiumDelPerfil(true);
   limpiarCacheWeb(log);
   limpiarLocksChromium(log);
+  // Pestañas que Chromium restauraría tras un cierre brusco (cada una otra copia de WhatsApp
+  // Web peleando por la sesión). Solo guarda pestañas; la sesión de WhatsApp vive en otro sitio.
+  try { fs.rmSync(path.join(PERFIL_DIR, 'Default', 'Sessions'), { recursive: true, force: true }); } catch (_) { /* ignorar */ }
   return huerfanos;
 }
 
