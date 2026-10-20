@@ -13,8 +13,35 @@ const BUNDLE = path.join(DIR_APP, 'vendor', 'baileys.bundle.mjs');
 const REINTENTOS_MAX = 5;
 
 const pausa = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
+
+const estadoDiag = { reconexiones: 0, ultimoCierre: null, entrantesNoDescifrados: 0 };
+
+// libsignal (dentro de Baileys) escribe directamente en consola: mensajes ENTRANTES que no
+// puede descifrar ("Bad MAC", habitual tras vincular; la app solo envía, no le afecta) y los
+// objetos de sesión al abrirlas/cerrarlas, que incluyen material de cifrado. Se silencia solo
+// eso; los fallos de descifrado se cuentan para el diagnóstico.
+const RUIDO_SIGNAL = /^(Failed to decrypt message|Session error:|Decrypted message with closed session|Closing (open |stale open )?session|Opening session:|Removing old closed session|Session already (closed|open)|Migrating session to|V1 session storage migration|Unhandled bucket type|WARNING: Expected pubkey)/;
+let silenciado = false;
+function silenciarRuidoSignal() {
+  if (silenciado) return;
+  silenciado = true;
+  for (const k of ['log', 'info', 'warn', 'error']) {
+    const original = console[k];
+    console[k] = (...args) => {
+      if (typeof args[0] === 'string' && RUIDO_SIGNAL.test(args[0])) {
+        if (args[0].startsWith('Failed to decrypt')) estadoDiag.entrantesNoDescifrados++;
+        return;
+      }
+      original.apply(console, args);
+    };
+  }
+}
+
 let libreria = null;
-const cargar = async () => (libreria ||= await import(pathToFileURL(BUNDLE).href));
+const cargar = async () => {
+  silenciarRuidoSignal();
+  return (libreria ||= await import(pathToFileURL(BUNDLE).href));
+};
 
 // Vinculada = hay credenciales con la cuenta ('me'); solo un QR a medias no cuenta.
 function sesionGuardada() {
@@ -24,7 +51,6 @@ const borrarSesion = () => fs.rmSync(AUTH_DIR, { recursive: true, force: true })
 
 const prepararArranque = async () => 0; // sin navegador: nada que limpiar
 
-const estadoDiag = { reconexiones: 0, ultimoCierre: null };
 async function diagnostico() {
   let bundle = null;
   try { bundle = fs.readFileSync(BUNDLE, 'utf8').slice(0, 120).match(/Baileys [\d.]+/)[0]; } catch (_) { /* sin bundle */ }
@@ -144,4 +170,4 @@ function crear({ log, libreria = null }) {
   return motor;
 }
 
-module.exports = { nombre: 'baileys', sesionGuardada, prepararArranque, diagnostico, crear };
+module.exports = { nombre: 'baileys', sesionGuardada, prepararArranque, diagnostico, crear, silenciarRuidoSignal };

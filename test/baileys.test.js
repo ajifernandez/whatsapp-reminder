@@ -137,6 +137,23 @@ const ok = (n) => console.log('OK  ' + n);
   assert.ok(d.reconexiones >= 5); assert.match(d.ultimoCierre, /428|440|401/);
   ok('diagnóstico: reconexiones y último cierre');
 
+  // 9. ruido de libsignal por consola: se silencia y se cuenta; lo demás pasa
+  const salida = [];
+  const original = console.error, originalInfo = console.info;
+  console.error = (...a) => salida.push(a.join(' '));
+  console.info = (...a) => salida.push(a.join(' '));
+  try {
+    Baileys.silenciarRuidoSignal();
+    const antes = (await Baileys.diagnostico()).entrantesNoDescifrados;
+    console.error('Failed to decrypt message with any known session...');
+    console.error('Session error:Error: Bad MAC', 'stack');
+    console.info('Opening session:', { claves: 'secreto' });
+    console.error('Otro error que sí debe verse');
+    assert.deepEqual(salida, ['Otro error que sí debe verse']);
+    assert.equal((await Baileys.diagnostico()).entrantesNoDescifrados, antes + 1);
+  } finally { console.error = original; console.info = originalInfo; }
+  ok('ruido de libsignal (Bad MAC, sesiones con claves) silenciado y contado; el resto se ve');
+
   fs.rmSync(DIR, { recursive: true, force: true });
   console.log('\nTODAS LAS PRUEBAS DEL MOTOR BAILEYS PASAN');
 })().catch((e) => { console.error('FALLO:', e); process.exit(1); });
