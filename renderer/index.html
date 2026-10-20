@@ -26,6 +26,7 @@
     </div>
   </header>
 
+  <div class="contenedor">
   <main>
     <!-- Aviso de último problema, con ayuda para resolverlo -->
     <div id="bannerError" class="banner-error oculto">
@@ -123,15 +124,19 @@
       </div>
     </section>
 
-    <!-- Registro -->
+  </main>
+
+  <!-- Registro: columna lateral fija en pantallas anchas, debajo en estrechas -->
+  <aside class="panel-registro">
     <section class="tarjeta">
       <div class="seccion-cabecera">
-        <h2>Registro de envíos</h2>
+        <h2>Registro</h2>
         <button id="btnLimpiarLog" class="btn btn-gris pequeno">Limpiar</button>
       </div>
       <ul id="log" class="log"></ul>
     </section>
-  </main>
+  </aside>
+  </div>
 
   <!-- Modal: pegar desde Excel/CSV -->
   <div id="modalPegar" class="modal oculto">
