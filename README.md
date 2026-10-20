@@ -80,7 +80,7 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 - `motores/` — cómo se habla con WhatsApp (misma interfaz en los dos, ver cabecera de `motores/wwebjs.js`):
   - `baileys.js` — por WebSocket, sin navegador. Vincula con QR o con código. Usa `vendor/baileys.bundle.mjs`.
   - `wwebjs.js` — whatsapp-web.js: Chromium oculto con web.whatsapp.com (el de la 2.x).
-  - Se elige en la página («Motor», bajo «Conectar WhatsApp») o con `"motor"` en `data/config.json`. Por defecto Baileys. Cada motor tiene su propia vinculación; si el nuevo no está vinculado, la página avisa.
+  - Se elige en la página («Motor», bajo «Conectar WhatsApp») o con `"motor"` en `data/config.json`. Por defecto: Baileys en instalaciones nuevas; las que ya usaban whatsapp-web.js siguen con él (sin volver a vincular) hasta que se cambie. Cada motor tiene su propia vinculación; si el elegido no está vinculado, la página avisa.
 - `vendor/baileys.bundle.mjs` — Baileys 6.7.24 empaquetado en un fichero (la portable no tiene npm). Se regenera con `npm run build:baileys`. La 7.0 (release candidate) la rechaza WhatsApp a fecha de 2026-10.
 - `update.js` — auto-actualizador desde GitHub (se ejecuta antes de `server.js`).
 - `test/` — `npm test`: updater, motor Baileys y servidor con un motor falso; sin red ni WhatsApp.
@@ -99,6 +99,7 @@ Ambas carpetas están ignoradas por git (contienen datos y sesión).
 - **Freno de versión mayor**: en el canal estable el auto-update solo actúa dentro de la misma versión mayor (2.x → 2.x). Una 3.0 en `main` solo se avisa («versión mayor nueva»); se instala de forma explícita con «Última versión» en el selector de la cabecera o `node update.js latest`.
 - **Canal beta por clínica**: `node update.js canal v3` hace que esa clínica siga la rama `v3` (sin freno: elegir el canal ya es aceptar la beta). `node update.js canal main` la devuelve a estable. Se guarda en `data/canal.txt` y sale en el diagnóstico (`canal`).
 - **Lista de ficheros remota**: el updater baja los ficheros que indica `archivosActualizables` en el `package.json` **remoto**, así una versión nueva puede añadir ficheros (p. ej. un motor empaquetado en `vendor/`). Rutas relativas sin `..`; si la lista falta o es inválida, usa la lista mínima de `update.js`.
+- **Autorreparación**: al arrancar, `server.js` comprueba que existen todos los ficheros de su `archivosActualizables` y descarga los que falten del tag de su versión. Cubre la primera actualización hecha por un updater ≤ 2.1.16, que solo bajaba su lista fija.
 - **Sin npm en la clínica**: la versión portable solo trae `bin\node.exe`, así que las dependencias nuevas deben ir empaquetadas como ficheros en `archivosActualizables`, no en `node_modules`.
 - Regla: no fusionar una versión mayor en `main` hasta que todas las clínicas informen (diagnóstico) una versión con freno (≥ 2.1.17); un updater más antiguo no frena.
 - Pruebas del updater (sin red): `npm test`.

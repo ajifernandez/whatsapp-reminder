@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
+const updater = require('./update.js');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT || 3000;
@@ -14,7 +15,13 @@ const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
 // pagina (/api/motor). Cada motor tiene su propia sesion: al cambiar hay que vincular.
 const MOTORES = { baileys: './motores/baileys', wwebjs: './motores/wwebjs' };
 const NOMBRES_MOTOR = { baileys: 'Baileys (recomendado)', wwebjs: 'whatsapp-web.js (anterior)' };
-const MOTOR_POR_DEFECTO = 'baileys';
+// Instalaciones que ya usaban whatsapp-web.js siguen con él (sin volver a vincular el
+// móvil); las nuevas, Baileys. Sin cargar los motores: puede que aún falten ficheros.
+function motorPorDefecto() {
+  const conWwebjs = fs.existsSync(path.join(__dirname, '.wwebjs_auth', 'session'));
+  const conBaileys = fs.existsSync(path.join(__dirname, '.baileys_auth', 'creds.json'));
+  return conWwebjs && !conBaileys ? 'wwebjs' : 'baileys';
+}
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -86,7 +93,7 @@ function guardarCitas(citas) {
 }
 
 function leerConfig() {
-  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: MOTOR_POR_DEFECTO };
+  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: motorPorDefecto() };
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(configBase, null, 2), 'utf8');
     return configBase;
@@ -97,7 +104,7 @@ function leerConfig() {
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
       autoEnvio: datos.autoEnvio === true,
-      motor: Object.hasOwn(MOTORES, datos.motor) ? datos.motor : MOTOR_POR_DEFECTO
+      motor: Object.hasOwn(MOTORES, datos.motor) ? datos.motor : motorPorDefecto()
     };
   } catch (_) {
     return configBase;
@@ -191,7 +198,7 @@ function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
 }
 
 // ---------- Cliente WhatsApp (lo propio de cada libreria vive en motores/) ----------
-let Motor = require(MOTORES[leerConfig().motor]);
+let Motor = null; // se carga al arrancar, tras comprobar que no faltan ficheros (ver arrancar())
 // motores con su sesion: para el selector de la pagina y el aviso de revincular
 const listaMotores = () => Object.keys(MOTORES).map((id) => ({ id, nombre: NOMBRES_MOTOR[id], vinculado: require(MOTORES[id]).sesionGuardada() }));
 // log del motor: ui=true tambien lo muestra en la pagina
@@ -680,7 +687,6 @@ app.post('/api/enviar', async (req, res) => {
 });
 
 // ---------- Actualizaciones ----------
-const updater = require('./update.js');
 
 app.get('/api/actualizacion', async (_req, res) => {
   try {
@@ -753,31 +759,45 @@ process.on('uncaughtException', (err) => {
   registrarLog('error', 'Excepción no capturada: ' + err.message);
 });
 
-const server = app.listen(PORT, () => {
-  console.log('==================================================');
-  console.log('  Recordatorios WhatsApp Multiplataforma');
-  console.log(`  Abre en tu navegador: http://localhost:${PORT}`);
-  console.log('==================================================');
-
-  // Si ya había una sesión de WhatsApp vinculada antes, intenta reconectar
-  // sola al arrancar en vez de obligar a pulsar "Conectar" cada vez.
-  if (Motor.sesionGuardada()) {
-    registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
-    iniciarSesion();
-  } else {
-    // p. ej. al pasar a la 3.0: la sesión del motor anterior no sirve para este
-    const otro = listaMotores().find((m) => m.vinculado);
-    if (otro) emitir('log', { tipo: 'aviso', texto: `Esta versión usa ${NOMBRES_MOTOR[Motor.nombre]}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»; QR o código). Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».` });
+let server = null;
+async function arrancar() {
+  // Una version nueva instalada por un updater antiguo puede venir sin sus ficheros nuevos
+  // (motores/, vendor/...): se descargan antes de cargar el motor.
+  try {
+    const reparados = await updater.repararFaltantes();
+    if (reparados.length) registrarLog('aviso', `Faltaban ficheros de la versión ${updater.versionLocal()}; descargados: ${reparados.join(', ')}`);
+  } catch (err) {
+    registrarLog('error', `Faltan ficheros de la aplicación y no se pudieron descargar (${err.message}). Conecta a internet y vuelve a abrirla.`);
   }
-});
+  Motor = require(MOTORES[leerConfig().motor]);
 
-// Segunda instancia con el puerto ocupado: sin esto el uncaughtException global se lo traga
-// y el proceso queda vivo y mudo.
-server.on('error', (err) => {
-  if (err.code !== 'EADDRINUSE') throw err;
-  registrarLog('error', `La aplicación ya está abierta (el puerto ${PORT} está ocupado). Usa http://localhost:${PORT} y no abras otra copia.`);
-  process.exit(1);
-});
+  server = app.listen(PORT, () => {
+    console.log('==================================================');
+    console.log('  Recordatorios WhatsApp Multiplataforma');
+    console.log(`  Abre en tu navegador: http://localhost:${PORT}`);
+    console.log('==================================================');
+
+    // Si ya había una sesión de WhatsApp vinculada antes, intenta reconectar
+    // sola al arrancar en vez de obligar a pulsar "Conectar" cada vez.
+    if (Motor.sesionGuardada()) {
+      registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
+      iniciarSesion();
+    } else {
+      // motor sin sesión pero con otro vinculado: la sesión de un motor no sirve para el otro
+      const otro = listaMotores().find((m) => m.vinculado);
+      if (otro) emitir('log', { tipo: 'aviso', texto: `Esta versión usa ${NOMBRES_MOTOR[Motor.nombre]}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»; QR o código). Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».` });
+    }
+  });
+
+  // Segunda instancia con el puerto ocupado: sin esto el uncaughtException global se lo traga
+  // y el proceso queda vivo y mudo.
+  server.on('error', (err) => {
+    if (err.code !== 'EADDRINUSE') throw err;
+    registrarLog('error', `La aplicación ya está abierta (el puerto ${PORT} está ocupado). Usa http://localhost:${PORT} y no abras otra copia.`);
+    process.exit(1);
+  });
+}
+arrancar();
 
 // ---------- Cierre limpio al cerrar el terminal ----------
 let cerrando = false;
@@ -793,7 +813,7 @@ async function apagar(motivo) {
     try { res.end(); } catch (_) { /* ignorar */ }
   }
 
-  await new Promise((resolve) => server.close(() => resolve()));
+  if (server) await new Promise((resolve) => server.close(() => resolve()));
 
   // cerrar el motor (con whatsapp-web.js, mata el Chromium de Puppeteer)
   if (client) {

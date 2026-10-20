@@ -896,7 +896,7 @@ function conectarEventos() {
   $('chkAutoEnvio').checked = !!config.autoEnvio;
   pintarTabla();
   pintarMotores(estadoInicial.motor, estadoInicial.motores || []);
-  // al pasar a otro motor (p. ej. la 3.0), su sesión aún no existe: avisar al abrir la página
+  // motor sin sesión pero con otro motor vinculado: avisar al abrir la página
   const motores = estadoInicial.motores || [];
   const actual = motores.find((m) => m.id === estadoInicial.motor);
   const otro = motores.find((m) => m.vinculado && m.id !== estadoInicial.motor);

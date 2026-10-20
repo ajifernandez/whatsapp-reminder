@@ -84,7 +84,19 @@ const ok = (n) => console.log('OK  ' + n);
   await assert.rejects(u.aplicarActualizacion());
   assert.equal(lee('server.js'), null);
   ok('si un fichero de la lista no existe: falla y no escribe nada');
-  // 10. la lista real del repo: todo existe y no falta ningún motor (si falta, la clínica
+  // 10. reparar ficheros que faltan (version nueva instalada por un updater antiguo)
+  limpiar();
+  fs.writeFileSync(path.join(DIR, 'package.json'), JSON.stringify({ version: '2.2.0', archivosActualizables: ['update.js', 'package.json', 'motores/baileys.js'] }));
+  repo = { 'v2.2.0': { 'motores/baileys.js': '// motor reparado' } };
+  assert.deepEqual(await u.repararFaltantes(), ['motores/baileys.js']);
+  assert.equal(lee('motores/baileys.js'), '// motor reparado');
+  assert.deepEqual(await u.repararFaltantes(), [], 'si no falta nada, no descarga');
+  fs.rmSync(path.join(DIR, 'motores/baileys.js'));
+  repo = {};
+  await assert.rejects(u.repararFaltantes(), 'sin red o sin tag: falla (el servidor lo registra)');
+  ok('repararFaltantes: baja del tag de su versión solo lo que falta; sin nada que bajar no hace nada');
+
+  // 11. la lista real del repo: todo existe y no falta ningún motor (si falta, la clínica
   // bajaría un server.js que requiere un fichero que no se descarga y no arrancaría)
   const RAIZ = path.join(__dirname, '..');
   const real = JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8')).archivosActualizables;
