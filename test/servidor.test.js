@@ -11,7 +11,7 @@ const assert = require('assert');
 const RAIZ = path.join(__dirname, '..');
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function arrancar({ sesionWwebjs = false, env = {}, saludPrevia = null } = {}) {
+async function arrancar({ sesionWwebjs = false, env = {}, saludPrevia = null, config = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-servidor-'));
   // todos los ficheros de la aplicación: si faltara alguno, el arranque iría a GitHub a por él
   for (const f of JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8')).archivosActualizables) {
@@ -19,6 +19,7 @@ async function arrancar({ sesionWwebjs = false, env = {}, saludPrevia = null } =
     fs.copyFileSync(path.join(RAIZ, f), path.join(dir, f));
   }
   if (sesionWwebjs) fs.mkdirSync(path.join(dir, '.wwebjs_auth', 'session'), { recursive: true });
+  if (config) { fs.mkdirSync(path.join(dir, 'data'), { recursive: true }); fs.writeFileSync(path.join(dir, 'data', 'config.json'), JSON.stringify(config)); }
   if (saludPrevia) { fs.mkdirSync(path.join(dir, 'data'), { recursive: true }); fs.writeFileSync(path.join(dir, 'data', 'salud.json'), JSON.stringify(saludPrevia)); }
   fs.symlinkSync(path.join(RAIZ, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   const puerto = 3900 + Math.floor(Math.random() * 90);
@@ -60,8 +61,8 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
   try {
     await s.esperarEstado('conectado');
     ok('con sesion guardada reconecta solo al arrancar');
-    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motor, 'baileys');
-    ok('instalación nueva: motor por defecto Baileys');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motor, 'wwebjs');
+    ok('instalación nueva: motor por defecto whatsapp-web.js (Baileys es experimental)');
 
     const r = await s.api('/api/enviar', [cita('Ana', '612345678'), cita('Sin WhatsApp', '611111000'), cita('Incompleta', '')]);
     assert.deepEqual(r, { enviados: 1, fallidos: 0, omitidos: 2, sinRespuesta: 0, total: 3 });
@@ -86,6 +87,7 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     const cambio = await s.api('/api/motor', { motor: 'wwebjs' });
     assert.equal(cambio.motor, 'wwebjs');
     assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motor, 'wwebjs');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motorElegido, true, 'elegido a mano');
     await s.esperarEstado('conectado'); // con sesión guardada reconecta sin esperar el cooldown
     assert.ok(Array.isArray((await s.api('/api/estado')).motores));
     ok('cambio de motor: valida, se guarda en config.json y reconecta');
@@ -112,6 +114,28 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     const r2 = await s.api('/api/enviar', [cita('Uno', '612345003'), cita('Mal', '612345888'), cita('Dos', '612345004')]);
     assert.deepEqual(r2, { enviados: 2, fallidos: 0, omitidos: 0, sinRespuesta: 1, total: 3 });
     ok('un único fallo sin respuesta no detiene el resto del lote');
+  } finally { await s.cerrar(); }
+
+  // Baileys guardado sin elegirlo (motor por defecto de 2.2.0-2.4.0) -> pasa a whatsapp-web.js, con aviso
+  s = await arrancar({ config: { mensaje: 'Hola {nombre}', autoEnvio: false, motor: 'baileys', latido: true } });
+  try {
+    await s.esperarEstado('conectado');
+    const cfg = JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8'));
+    assert.equal(cfg.motor, 'wwebjs');
+    assert.equal(cfg.mensaje, 'Hola {nombre}', 'el resto de la configuración se conserva');
+    assert.ok((await s.api('/api/diagnostico')).log.some((l) => l.includes('Se usa whatsapp-web.js en lugar de Baileys')), 'queda anotado');
+    const nombres = (await s.api('/api/estado')).motores.map((m) => m.nombre);
+    assert.deepEqual(nombres, ['whatsapp-web.js (recomendado)', 'Baileys (experimental)']);
+    ok('Baileys heredado (no elegido) pasa a whatsapp-web.js una vez, con aviso; el selector lo marca experimental');
+  } finally { await s.cerrar(); }
+
+  // Baileys elegido a mano en el selector se respeta
+  s = await arrancar({ config: { mensaje: 'Hola {nombre}', autoEnvio: false, motor: 'baileys', motorElegido: true, latido: true } });
+  try {
+    await s.esperarEstado('conectado');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, 'data', 'config.json'), 'utf8')).motor, 'baileys');
+    assert.ok(!(await s.api('/api/diagnostico')).log.some((l) => l.includes('Se usa whatsapp-web.js en lugar de Baileys')));
+    ok('Baileys elegido a mano se respeta');
   } finally { await s.cerrar(); }
 
   // salud de la conexion: 'conectado' pasa a 'degradado' con la causa, y se recupera

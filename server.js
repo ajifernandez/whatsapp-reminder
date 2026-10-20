@@ -13,15 +13,14 @@ const LOG_PATH = path.join(DATA_DIR, 'app.log');
 const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
 // Motor de WhatsApp (motores/*.js). Se elige con "motor" en data/config.json o desde la
 // pagina (/api/motor). Cada motor tiene su propia sesion: al cambiar hay que vincular.
-const MOTORES = { baileys: './motores/baileys', wwebjs: './motores/wwebjs' };
-const NOMBRES_MOTOR = { baileys: 'Baileys (recomendado)', wwebjs: 'whatsapp-web.js (anterior)' };
-// Instalaciones que ya usaban whatsapp-web.js siguen con él (sin volver a vincular el
-// móvil); las nuevas, Baileys. Sin cargar los motores: puede que aún falten ficheros.
-function motorPorDefecto() {
-  const conWwebjs = fs.existsSync(path.join(__dirname, '.wwebjs_auth', 'session'));
-  const conBaileys = fs.existsSync(path.join(__dirname, '.baileys_auth', 'creds.json'));
-  return conWwebjs && !conBaileys ? 'wwebjs' : 'baileys';
-}
+const MOTORES = { wwebjs: './motores/wwebjs', baileys: './motores/baileys' };
+const NOMBRES_MOTOR = { wwebjs: 'whatsapp-web.js (recomendado)', baileys: 'Baileys (experimental)' };
+// whatsapp-web.js para todas. Baileys es experimental: con el algunos moviles no llegan a descifrar
+// los mensajes y se quedan en «Esperando el mensaje…» (fallo abierto en Baileys, octubre 2026), asi
+// que solo se usa si alguien lo elige a mano en el selector (motorElegido).
+const MOTOR_POR_DEFECTO = 'wwebjs';
+const motorDe = (datos) => (datos.motor === 'baileys' && datos.motorElegido !== true ? MOTOR_POR_DEFECTO
+  : Object.hasOwn(MOTORES, datos.motor) ? datos.motor : MOTOR_POR_DEFECTO);
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -93,7 +92,7 @@ function guardarCitas(citas) {
 }
 
 function leerConfig() {
-  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: motorPorDefecto(), latido: true };
+  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: MOTOR_POR_DEFECTO, motorElegido: false, latido: true };
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(configBase, null, 2), 'utf8');
     return configBase;
@@ -104,7 +103,8 @@ function leerConfig() {
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
       autoEnvio: datos.autoEnvio === true,
-      motor: Object.hasOwn(MOTORES, datos.motor) ? datos.motor : motorPorDefecto(),
+      motor: motorDe(datos),
+      motorElegido: datos.motorElegido === true,
       latido: datos.latido !== false // avisar a soporte del estado: activado salvo que se desactive
     };
   } catch (_) {
@@ -117,8 +117,9 @@ function guardarConfig(config) {
   const mensaje = typeof config?.mensaje === 'string' && config.mensaje.trim() ? config.mensaje : actual.mensaje;
   const autoEnvio = typeof config?.autoEnvio === 'boolean' ? config.autoEnvio : actual.autoEnvio;
   const motor = Object.hasOwn(MOTORES, config?.motor) ? config.motor : actual.motor;
+  const motorElegido = typeof config?.motorElegido === 'boolean' ? config.motorElegido : actual.motorElegido;
   const latido = typeof config?.latido === 'boolean' ? config.latido : actual.latido;
-  const nuevo = { ...actual, mensaje, autoEnvio, motor, latido };
+  const nuevo = { ...actual, mensaje, autoEnvio, motor, motorElegido, latido };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nuevo, null, 2), 'utf8');
   return nuevo;
 }
@@ -712,7 +713,7 @@ app.post('/api/motor', (req, res) => {
   clientReady = false;
   terminarSalud('cambio de motor');
   Motor = require(MOTORES[id]);
-  guardarConfig({ motor: id });
+  guardarConfig({ motor: id, motorElegido: true }); // elegido a mano: se respeta (incluido Baileys)
   emitir('estado', 'desconectado');
   emitir('log', { tipo: 'info', texto: `Motor cambiado a ${NOMBRES_MOTOR[id]}.` + (Motor.sesionGuardada() ? ' Conectando con su sesión guardada...' : ' Pulsa «Conectar WhatsApp» y vincula el móvil.') });
   if (Motor.sesionGuardada()) {
@@ -996,6 +997,15 @@ async function arrancar() {
   } catch (err) {
     registrarLog('error', `Faltan ficheros de la aplicación y no se pudieron descargar (${err.message}). Conecta a internet y vuelve a abrirla.`);
   }
+  // Entre 2.2.0 y 2.4.0 Baileys era el motor por defecto de las instalaciones nuevas y quedaba guardado sin
+  // que nadie lo eligiera: se pasan a whatsapp-web.js una sola vez y se deja anotado.
+  try {
+    const crudo = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    if (crudo.motor === 'baileys' && crudo.motorElegido !== true) {
+      guardarConfig({ motor: MOTOR_POR_DEFECTO, motorElegido: false });
+      registrarLog('aviso', 'Se usa whatsapp-web.js en lugar de Baileys (experimental: algunos móviles no reciben los mensajes). Si no está vinculado, pulsa «Conectar WhatsApp» y vincula el móvil.');
+    }
+  } catch (_) { /* sin config.json: valores por defecto */ }
   Motor = require(MOTORES[leerConfig().motor]);
 
   server = app.listen(PORT, () => {
@@ -1012,7 +1022,7 @@ async function arrancar() {
     } else {
       // motor sin sesión pero con otro vinculado: la sesión de un motor no sirve para el otro
       const otro = listaMotores().find((m) => m.vinculado);
-      if (otro) emitir('log', { tipo: 'aviso', texto: `Esta versión usa ${NOMBRES_MOTOR[Motor.nombre]}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»; QR o código). Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».` });
+      if (otro) emitir('log', { tipo: 'aviso', texto: `Esta versión usa ${NOMBRES_MOTOR[Motor.nombre]}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»).` + (otro.id === 'baileys' ? '' : ` Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`) });
     }
   });
 

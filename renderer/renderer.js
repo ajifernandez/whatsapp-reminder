@@ -527,7 +527,10 @@ $('selMotor').addEventListener('change', async () => {
   const sel = $('selMotor');
   const nuevo = sel.value;
   const aviso = conectado ? ' Se cortará la conexión actual.' : '';
-  if (!confirm(`¿Cambiar el motor de WhatsApp?${aviso} Si el nuevo motor no está vinculado, habrá que vincular el móvil.`)) {
+  const experimental = nuevo === 'baileys'
+    ? '\n\nATENCIÓN: Baileys es experimental. Con él, algunos móviles no llegan a recibir los mensajes (se quedan en «Esperando el mensaje»). No lo uses para los recordatorios de pacientes.'
+    : '';
+  if (!confirm(`¿Cambiar el motor de WhatsApp?${aviso} Si el nuevo motor no está vinculado, habrá que vincular el móvil.${experimental}`)) {
     sel.value = motorActual;
     return;
   }
@@ -944,7 +947,8 @@ function conectarEventos() {
   const actual = motores.find((m) => m.id === estadoInicial.motor);
   const otro = motores.find((m) => m.vinculado && m.id !== estadoInicial.motor);
   if (actual && !actual.vinculado && otro && !operativo(estadoInicial.estado)) {
-    log(`Esta versión usa ${actual.nombre}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»; QR o código). Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`, 'aviso');
+    log(`Esta versión usa ${actual.nombre}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»).`
+      + (otro.id === 'baileys' ? '' : ` Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`), 'aviso');
   }
   if (estadoInicial.version) {
     $('versionTexto').textContent = 'v' + estadoInicial.version;
