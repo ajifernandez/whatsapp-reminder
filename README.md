@@ -102,4 +102,12 @@ Qué mirar:
 - `Error de autenticación` / `Sesión desconectada`: el teléfono desvinculó la sesión; hay que volver a escanear el QR.
 - `La conexión tardó más de 90s`: ver las líneas anteriores del log para saber en qué fase se quedó.
 
+Campos útiles del informe para un cuelgue de conexión:
+
+- `redWhatsApp`: si Node llega a `web.whatsapp.com`. Si Node llega y Chromium no, lo bloquea el navegador (antivirus, cortafuegos del `chrome.exe`, proxy del sistema); si Node tampoco, es la red.
+- `proxy`: variables de entorno y, en Windows, el proxy de Internet Settings (el que usa Chromium). Sin credenciales.
+- `procesosChromiumPerfil`: procesos de navegador vivos con el perfil de la app (más de ~10 con la app parada indica restos de un intento anterior).
+- En el log, líneas `[conexión +Ns]`: «Chromium lanzado», «Página creada», peticiones fallidas (`net::ERR_…`) y, a los 45 s sin conectar, los hosts con peticiones pendientes. Dicen en qué fase se atasca. Solo guardan hosts y estados, nunca contenido de la página.
+- Las rutas salen sin el nombre de usuario de Windows (`C:\Users\<usuario>\…`).
+
 El log completo está en `data/app.log` (se recorta solo a 512 KB). Borrar `.wwebjs_auth` es el último recurso: pierde la sesión y obliga a volver a vincular.

@@ -389,6 +389,7 @@ async function iniciarSesion() {
   // de que llegue 'ready': si se liberara aquí, un clic en "Conectar" durante
   // ese hueco caería en el cooldown y pondría estado 'desconectado' aunque la
   // conexión siguiera en marcha.
+  vigilarConexion(c).catch(() => {});
   c.initialize().catch((err) => {
     if (client !== c) return; // ya descartado (timeout): el aviso ya se dio
     // si el cliente fallido se quedara en 'client', el siguiente intento lo reutilizaria roto
@@ -622,17 +623,85 @@ function anonimizar(linea) {
   return prefijo + texto
     .replace(/(Enviado a|Error con|omitida:) [^(\n]+?(?= \(|$)/g, '$1 [nombre]')
     .replace(/^[^(\n]+(?= \([^)]*\): el número no es válido)/, '[nombre]')
-    .replace(/\+?\d[\d\s-]{6,}\d/g, '[tel]');
+    .replace(/\+?\d[\d\s-]{6,}\d/g, '[tel]')
+    .replace(sinUsuarioRe, '$1<usuario>');
 }
+
+// Las rutas llevan el nombre de usuario del PC: se oculta en el informe.
+const sinUsuarioRe = /([A-Za-z]:[\\/]Users[\\/]|\/home\/|\/Users\/)[^\\/\n]+/gi;
+const sinUsuario = (ruta) => (ruta == null ? ruta : String(ruta).replace(sinUsuarioRe, '$1<usuario>'));
 
 // Receptor de diagnosticos (ver soporte-server/). Si falla o esta vacio, la UI cae a descarga + correo.
 const DIAG_URL = process.env.DIAG_URL || 'https://soporte.familia-jimenez.es/diagnostico';
+
+// Si Node llega a WhatsApp Web pero Chromium no, el bloqueo es del navegador (antivirus,
+// cortafuegos del chrome.exe, proxy del sistema); si Node tampoco, es la red.
+async function pruebaRed() {
+  const t = Date.now();
+  try {
+    const r = await fetch('https://web.whatsapp.com/', { method: 'HEAD', signal: AbortSignal.timeout(8000) });
+    return `HTTP ${r.status} en ${Date.now() - t} ms`;
+  } catch (e) {
+    return `fallo tras ${Date.now() - t} ms: ${(e.cause && e.cause.code) || e.name}`;
+  }
+}
+
+// Chromium usa el proxy de Windows (Internet Settings), no el de Node. Sin credenciales.
+async function proxyDelSistema() {
+  const r = { variablesEntorno: ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY'].filter((k) => process.env[k] || process.env[k.toLowerCase()]) };
+  if (process.platform === 'win32') {
+    for (const v of ['ProxyEnable', 'ProxyServer', 'AutoConfigURL']) {
+      const out = await ejecutar('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', '/v', v]);
+      const m = out.match(/REG_\w+\s+(.+)/);
+      r[v] = m ? m[1].trim().replace(/\/\/[^@/\s]+@/g, '//') : null;
+    }
+  }
+  return r;
+}
+
+// Registra en que fase se atasca una conexion lenta: Chromium lanzado, pagina creada,
+// peticiones fallidas y, a los 45 s, las que siguen pendientes (el cuelgue de la clinica
+// esta en la carga de web.whatsapp.com, que espera a TODOS sus recursos). Solo hosts y
+// estados, nunca contenido de la pagina: podria haber chats.
+async function vigilarConexion(c) {
+  const t0 = Date.now();
+  const seg = () => Math.round((Date.now() - t0) / 1000);
+  const nota = (texto) => registrarLog('info', `[conexión +${seg()}s] ${texto}`);
+  const host = (u) => { try { const x = new URL(u); return x.host || x.protocol; } catch (_) { return '?'; } };
+  const pendientes = new Map();
+  let navegador = false, pagina = null, informado = false, notas = 0;
+  const limitada = (texto) => { if (notas++ < 25) nota(texto); };
+  while (client === c && !clientReady && seg() < TIMEOUT_CONEXION_MS / 1000) {
+    if (!navegador && c.pupBrowser) { navegador = true; nota('Chromium lanzado'); }
+    if (!pagina && c.pupPage) {
+      pagina = c.pupPage;
+      nota('Página creada');
+      pagina.on('request', (r) => pendientes.set(r, `${host(r.url())} (${r.resourceType()})`));
+      pagina.on('requestfinished', (r) => pendientes.delete(r));
+      pagina.on('requestfailed', (r) => { pendientes.delete(r); limitada(`Petición fallida: ${(r.failure() && r.failure().errorText) || '?'} ${host(r.url())}`); });
+      pagina.on('pageerror', (e) => limitada('Error en la página: ' + String(e.message).slice(0, 120)));
+    }
+    if (!informado && seg() >= 45) {
+      informado = true;
+      const hosts = [...new Set(pendientes.values())].slice(0, 8).join(', ');
+      nota(`Sin conectar: ${pendientes.size} peticiones pendientes${hosts ? ': ' + hosts : ''}; navegador=${navegador}, página=${!!pagina}${pagina ? ', url=' + host(pagina.url()) : ''}`);
+      if (pagina) {
+        try {
+          const estado = await Promise.race([pagina.evaluate(() => document.readyState), pausa(3000)]);
+          nota('Estado de la página: ' + (estado || 'sin respuesta en 3 s'));
+        } catch (e) { nota('Estado de la página: error ' + String(e.message).slice(0, 80)); }
+      }
+    }
+    await pausa(100);
+  }
+}
 
 async function informeDiagnostico() {
   const os = require('os');
   const version = (modulo) => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'node_modules', modulo, 'package.json'), 'utf8')).version; } catch (_) { return null; } };
   let chromiumRuta = null; try { chromiumRuta = require('puppeteer').executablePath(); } catch (_) { /* sin puppeteer */ }
   let discoLibreMB = null; try { const f = fs.statfsSync(__dirname); discoLibreMB = Math.round((f.bavail * f.bsize) / 1048576); } catch (_) { /* sin statfs */ }
+  const [red, proxy] = await Promise.all([pruebaRed(), proxyDelSistema()]);
   const sesion = path.join(AUTH_PATH, 'session');
   const locks = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].filter((f) => fs.lstatSync(path.join(sesion, f), { throwIfNoEntry: false }));
   let log = [];
@@ -644,7 +713,8 @@ async function informeDiagnostico() {
     sesionVinculada: fs.existsSync(sesion), locksChromium: locks,
     lockYaExistiaAlArrancar: locksAlArrancar, citas: leerCitas().length,
     procesosChromiumPerfil: await chromiumDelPerfil(false), whatsappWebJs: version('whatsapp-web.js'), puppeteer: version('puppeteer'),
-    chromiumRuta, rutaApp: __dirname, enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
+    redWhatsApp: red, proxy,
+    chromiumRuta: sinUsuario(chromiumRuta), rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
     log: log.map(anonimizar)
   };
 }
@@ -762,6 +832,14 @@ const server = app.listen(PORT, () => {
     registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
     iniciarSesion();
   }
+});
+
+// Segunda instancia con el puerto ocupado: sin esto el uncaughtException global se lo traga
+// y el proceso queda vivo y mudo.
+server.on('error', (err) => {
+  if (err.code !== 'EADDRINUSE') throw err;
+  registrarLog('error', `La aplicación ya está abierta (el puerto ${PORT} está ocupado). Usa http://localhost:${PORT} y no abras otra copia.`);
+  process.exit(1);
 });
 
 // ---------- Cierre limpio al cerrar el terminal ----------
