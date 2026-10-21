@@ -76,7 +76,8 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
     assert.equal(diag.motor, 'falso');
     assert.ok(diag.log.some((l) => l.includes('Enviado a [nombre] ([tel])')), 'el log del informe va anonimizado');
     assert.ok(!JSON.stringify(diag).includes('612345678'), 'el telefono no sale en el informe');
-    ok('diagnostico: motor y log anonimizado');
+    assert.deepEqual(diag.envios, { enviados: 1, fallidos: 0, omitidos: 1, sinRespuesta: 0, citasIncompletas: 1 }, 'resumen de envíos del informe');
+    ok('diagnostico: motor, log anonimizado y resumen de envíos');
 
     // texto libre: solo scripts del mismo equipo (sin Origin) y solo JSON
     const libre = (cuerpo, cab = {}) => fetch(s.base + '/api/mensaje', { method: 'POST', headers: { 'Content-Type': 'application/json', ...cab }, body: JSON.stringify(cuerpo) });
