@@ -358,10 +358,17 @@ const FALLOS_PARA_AVISAR = 2;
 const salud = { degradada: false, fallosSeguidos: 0, ultimoOk: null, desde: null, causa: null, consejo: null };
 let comprobandoSalud = false;
 const contadores = { comprobaciones: 0, fallos: 0 };
-// envios desde el arranque (manuales y automaticos), para el informe de soporte
-const envios = { enviados: 0, fallidos: 0, omitidos: 0, sinRespuesta: 0, citasIncompletas: 0 };
-const CLAVE_ENVIO = { enviado: 'enviados', fallido: 'fallidos', omitido: 'omitidos', sin_respuesta: 'sinRespuesta' };
-function contarEnvio(resultado) { if (CLAVE_ENVIO[resultado]) envios[CLAVE_ENVIO[resultado]]++; }
+// envios agrupados por hora local ('AAAA-MM-DD HH'), manuales y automaticos, para el informe de soporte.
+// Se guardan las ultimas 72 horas de esta ejecucion.
+const envios = {};
+const CLAVE_ENVIO = { enviado: 'enviados', fallido: 'fallidos', omitido: 'omitidos', sin_respuesta: 'sinRespuesta', incompleta: 'citasIncompletas' };
+function contarEnvio(resultado) {
+  const hora = new Date().toLocaleString('sv-SE', { hour12: false }).slice(0, 13);
+  const b = (envios[hora] ||= { enviados: 0, fallidos: 0, omitidos: 0, sinRespuesta: 0, citasIncompletas: 0 });
+  if (CLAVE_ENVIO[resultado]) b[CLAVE_ENVIO[resultado]]++;
+  const horas = Object.keys(envios);
+  if (horas.length > 72) delete envios[horas[0]];
+}
 
 // Historial de incidentes (conexion con problemas): sobrevive a los reinicios, porque lo habitual
 // es reiniciar la aplicacion y mandar el diagnostico despues, cuando el problema ya "se ha ido".
@@ -551,7 +558,7 @@ async function enviarRecordatorios(citas) {
 
     if (!cita.telefono || !cita.hora || !cita.fecha) {
       omitidos++;
-      envios.citasIncompletas++;
+      contarEnvio('incompleta');
       emitir('log', { tipo: 'aviso', texto: `Cita incompleta omitida: ${cita.nombre || '(sin nombre)'}` });
       emitir('progreso', { hecho: i + 1, total: lista.length });
       continue;
@@ -884,7 +891,7 @@ async function informeDiagnostico() {
     version: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
-    citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(), envios: { ...envios }, lineasDesdeArranque,
+    citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(), envios, lineasDesdeArranque,
     latido: { activo: Boolean(LATIDO_URL) && leerConfig().latido, id: idInstalacion(), fallando: latidoFalla },
     ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
     redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
