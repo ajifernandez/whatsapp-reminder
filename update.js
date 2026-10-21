@@ -93,6 +93,20 @@ function versionLocal() {
   }
 }
 
+// Version del codigo que esta corriendo (se lee al cargar este modulo). Tras descargar una version
+// nueva el disco ya dice otra cosa hasta que se reinicia: por eso se muestra esta, no versionLocal().
+const VERSION_EN_EJECUCION = versionLocal();
+function versionEnEjecucion() { return VERSION_EN_EJECUCION; }
+
+// Al arrancar: si hay una version nueva permitida, la descarga. Devuelve true si la ha instalado
+// (el arranque se relanza entonces con el codigo nuevo).
+async function instalarSiHayNueva() {
+  const b = await buscarActualizacion();
+  if (!b.hayActualizacion || b.fijada || b.nuevaMayor) return false;
+  await aplicarActualizacion();
+  return true;
+}
+
 const mayorDe = (v) => parseInt(String(v).split('.')[0], 10) || 0;
 
 // Compara semver simple (a > b). Evita "actualizar" a una version igual o menor.
@@ -194,7 +208,7 @@ async function listarVersiones() {
     .sort((a, b) => (esMayor(a, b) ? -1 : 1));
 }
 
-module.exports = { buscarActualizacion, aplicarActualizacion, repararFaltantes, versionLocal, fijarVersion, quitarFijacion, versionFijada, listarVersiones, canal, fijarCanal, ARCHIVOS };
+module.exports = { buscarActualizacion, aplicarActualizacion, instalarSiHayNueva, repararFaltantes, versionLocal, versionEnEjecucion, fijarVersion, quitarFijacion, versionFijada, listarVersiones, canal, fijarCanal, ARCHIVOS };
 
 // Ejecucion directa (desde Iniciar.bat). Nunca corta el arranque: si falla la
 // red, avisa y sale con 0 para que el servidor arranque con la version actual.

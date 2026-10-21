@@ -623,7 +623,7 @@ $('btnActualizar').addEventListener('click', async () => {
   try {
     toast('Comprobando actualizaciones...');
     const r = await api.actualizar();
-    if (r.actualizado) toast(`Actualizado a la versión ${r.version}. Cierra y vuelve a abrir la aplicación.`, 'ok');
+    if (r.nueva) toast(`Hay una versión nueva (${r.nueva}). Reinicia la aplicación para instalarla.`, 'aviso');
     else if (r.fijada) toast(`Versión fijada en ${r.version}: no se actualiza sola.`, 'aviso');
     else if (r.nuevaMayor) toast(`Hay una versión mayor nueva (${r.nuevaMayor}). No se instala sola: avisa a soporte para instalarla.`, 'aviso');
     else toast(`Ya tienes la última versión (${r.version}).`, 'ok');
@@ -977,8 +977,8 @@ function conectarEventos() {
         const v = $('versionTexto');
         v.textContent = `v${info.local} → ${info.remota} disponible`;
         v.classList.add('hay-nueva');
-        v.title = 'Hay una versión más nueva: pulsa «⟳ Comprobar versión» o reinicia la aplicación';
-        log(`Hay una versión nueva (${info.remota}). Pulsa «⟳ Comprobar versión» o reinicia la aplicación.`, 'aviso');
+        v.title = 'Hay una versión más nueva: reinicia la aplicación para instalarla';
+        log(`Hay una versión nueva (${info.remota}). Reinicia la aplicación para instalarla.`, 'aviso');
       }
     })
     .catch(() => { /* sin conexion: ignorar */ });

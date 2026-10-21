@@ -36,6 +36,17 @@ const ok = (n) => console.log('OK  ' + n);
   assert.ok(esc.includes('motores/baileys.js')); assert.equal(lee('motores/baileys.js'), '// motor');
   ok('2.1.17 -> 2.1.18 en main: se actualiza y baja el fichero nuevo de la lista remota');
 
+  // 1b. al arrancar: instala si hay versión nueva; si no, no toca nada. La versión en ejecución no cambia hasta reiniciar.
+  limpiar(); local('2.1.17'); repo = { main: rama('2.1.18', { archivos: lista() }) };
+  const enEjecucion = u.versionEnEjecucion();
+  assert.equal(await u.instalarSiHayNueva(), true); assert.equal(lee('server.js'), '// server.js 2.1.18');
+  assert.equal(u.versionEnEjecucion(), enEjecucion, 'lo que corre sigue siendo la anterior hasta reiniciar');
+  assert.equal(u.versionLocal(), '2.1.18', 'en disco ya está la nueva');
+  assert.equal(await u.instalarSiHayNueva(), false, 'ya al día: no vuelve a instalar');
+  limpiar(); local('2.1.17'); repo = { main: rama('3.0.0', { archivos: lista() }) };
+  assert.equal(await u.instalarSiHayNueva(), false, 'mayor: no se instala sola');
+  ok('arranque: instala la nueva si la hay (sin tocar lo que corre), no salta mayores');
+
   // 2. freno de mayor en main
   limpiar(); local('2.1.17'); repo = { main: rama('3.0.0', { archivos: lista() }) };
   r = await u.buscarActualizacion();

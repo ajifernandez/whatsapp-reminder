@@ -24,7 +24,7 @@ async function arrancar({ sesionWwebjs = false, env = {}, saludPrevia = null, co
   fs.symlinkSync(path.join(RAIZ, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   const puerto = 3900 + Math.floor(Math.random() * 90);
   const proc = spawn(process.execPath, ['-r', path.join(__dirname, 'motor-falso.js'), 'server.js'], {
-    cwd: dir, env: { ...process.env, PORT: String(puerto), FALSO_DIR: dir, FALSO_SESION: '1', DIAG_URL: '', LATIDO_URL: '', ...env }, stdio: 'ignore'
+    cwd: dir, env: { ...process.env, PORT: String(puerto), FALSO_DIR: dir, FALSO_SESION: '1', DIAG_URL: '', LATIDO_URL: '', WR_SIN_ACTUALIZAR: '1', ...env }, stdio: 'ignore'
   });
   const base = `http://localhost:${puerto}`;
   const api = async (ruta, cuerpo) => (await fetch(base + ruta, cuerpo === undefined ? {} : {
