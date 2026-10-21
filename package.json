@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-reminder",
-  "version": "2.5.10",
+  "version": "2.5.11",
   "description": "Servidor web local para enviar recordatorios de citas por WhatsApp",
   "main": "server.js",
   "scripts": {

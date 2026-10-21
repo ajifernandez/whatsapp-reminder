@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const updater = require('./update.js');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -718,7 +718,7 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores(), salud: datosSalud() }));
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores(), salud: datosSalud() }));
 
 // Cambio de motor desde la pagina: corta la conexion actual (cada motor tiene su sesion)
 // y, si el nuevo ya esta vinculado, conecta con el.
@@ -812,7 +812,7 @@ async function enviarLatidoAhora(estado) {
     const r = await fetch(LATIDO_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
       body: JSON.stringify({
-        id: idInstalacion(), host: require('os').hostname(), version: updater.versionLocal(), canal: updater.canal(),
+        id: idInstalacion(), host: require('os').hostname(), version: updater.versionEnEjecucion(), canal: updater.canal(),
         motor: Motor && Motor.nombre, estado: estado || estadoActual(), causa: salud.causa,
         ultimoError: ultimoError ? anonimizar(ultimoError).slice(0, 200) : null, ultimoOk: salud.ultimoOk,
         arranqueHaceSeg: Math.round(process.uptime())
@@ -888,7 +888,7 @@ async function informeDiagnostico() {
   while (log.length > 80 && Buffer.byteLength(log.join('\n')) > 200 * 1024) { log.shift(); omitidas++; }
   if (omitidas) log.unshift(`[${omitidas} líneas más antiguas de esta ejecución omitidas por tamaño]`);
   return {
-    version: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
+    version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
     citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(), envios, lineasDesdeArranque,
@@ -1038,10 +1038,9 @@ app.post('/api/actualizar', async (_req, res) => {
       emitir('log', { tipo: 'ok', texto: `Ya tienes la última versión (${local}).` });
       return res.json({ actualizado: false, version: local });
     }
-    emitir('log', { tipo: 'info', texto: `Nueva versión ${remota} disponible (tienes ${local}). Descargando...` });
-    const archivos = await updater.aplicarActualizacion();
-    emitir('log', { tipo: 'ok', texto: `Actualizado a la version ${remota}. Reinicia la aplicacion para aplicar los cambios.` });
-    res.json({ actualizado: true, version: remota, archivos });
+    // No se descarga aqui: la version nueva se instala al reiniciar la aplicacion.
+    emitir('log', { tipo: 'aviso', texto: `Hay una versión nueva (${remota}; tienes ${local}). Reinicia la aplicación para instalarla.` });
+    res.json({ actualizado: false, version: local, nueva: remota });
   } catch (err) {
     emitir('log', { tipo: 'error', texto: 'No se pudo actualizar: ' + err.message });
     res.status(502).json({ error: err.message });
@@ -1059,6 +1058,20 @@ process.on('uncaughtException', (err) => {
 
 let server = null;
 async function arrancar() {
+  // Version nueva: se descarga aqui, antes de cargar el codigo, y el arranque se relanza con ella.
+  // El proceso padre espera al hijo (misma ventana) y sale con su mismo codigo.
+  if (!process.env.WR_YA_ACTUALIZADO && process.env.WR_SIN_ACTUALIZAR !== '1') {
+    try {
+      if (await updater.instalarSiHayNueva()) {
+        registrarLog('ok', 'Versión nueva instalada al arrancar. Se reinicia con ella.');
+        const hijo = spawn(process.execPath, [__filename], { stdio: 'inherit', env: { ...process.env, WR_YA_ACTUALIZADO: '1' } });
+        hijo.on('exit', (codigo) => process.exit(codigo ?? 0));
+        return;
+      }
+    } catch (err) {
+      registrarLog('aviso', `No se pudo comprobar la versión al arrancar (${err.message}). Se arranca la que hay.`);
+    }
+  }
   // Una version nueva instalada por un updater antiguo puede venir sin sus ficheros nuevos
   // (motores/, vendor/...): se descargan antes de cargar el motor.
   try {
