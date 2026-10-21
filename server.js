@@ -37,6 +37,7 @@ function leerUltimoErrorDelLog() {
     if (!fs.existsSync(LOG_PATH)) return null;
     const lineas = fs.readFileSync(LOG_PATH, 'utf8').trimEnd().split('\n');
     for (let i = lineas.length - 1; i >= 0; i--) {
+      if (lineas[i].includes('WhatsApp conectado y listo')) return null; // hubo una conexión buena después: ningún error vigente
       if (lineas[i].includes('[error]')) {
         return lineas[i].replace(/^\[[^\]]*\]\s*\[error\]\s*/, '');
       }
