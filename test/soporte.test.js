@@ -220,7 +220,7 @@ const dirsTemporales = [];
   } finally { await r.parar(); }
 
   // --- disponibilidad por día: acumulación real con latidos y un hueco sin señal
-  r = await arrancar({ env: { OFFLINE_MIN: '0.02' } }); // 1,2 s
+  r = await arrancar({ env: { OFFLINE_MIN: '0.02', HORA_INI: '0', HORA_FIN: '24' } }); // 1,2 s; todo el día, para que no dependa de la hora de la prueba
   dirsTemporales.push(r.dir);
   try {
     const leer = () => JSON.parse(fs.readFileSync(path.join(r.dir, 'estado', 'clinicas.json'), 'utf8'))[ID1].dias;
