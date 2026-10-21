@@ -159,12 +159,20 @@ const HORA_MS = 3600e3;
 const bucketDe = (estado) => ({ conectado: 'ok', degradado: 'warning', conectando: 'conectando', apagada: 'apagada' }[estado] || 'desconectado');
 const diaDe = (t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: ZONA }); // AAAA-MM-DD en la zona de soporte
 
+// Horario de la clinica (hora de ZONA): fuera de el no cuenta, ni como disponible ni como caida
+const HORA_INI = process.env.HORA_INI !== undefined ? Number(process.env.HORA_INI) : 8; // HORA_INI/HORA_FIN: solo para pruebas
+const HORA_FIN = process.env.HORA_FIN !== undefined ? Number(process.env.HORA_FIN) : 21;
+const horaDe = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: ZONA, hour: 'numeric', hourCycle: 'h23' }).format(t));
+
 // Suma [desde, hasta) a dias[dia][bucket], troceando por horas para no pasarse de dia
 function repartir(dias, desde, hasta, bucket) {
   for (let a = desde; a < hasta;) {
     const fin = Math.min(hasta, (Math.floor(a / HORA_MS) + 1) * HORA_MS);
-    const d = (dias[diaDe(a)] ||= {});
-    d[bucket] = (d[bucket] || 0) + (fin - a);
+    const h = horaDe(a);
+    if (h >= HORA_INI && h < HORA_FIN) {
+      const d = (dias[diaDe(a)] ||= {});
+      d[bucket] = (d[bucket] || 0) + (fin - a);
+    }
     a = fin;
   }
 }
@@ -204,7 +212,7 @@ function graficaDias(c, ahora) {
     casillas.push(`<span class="dia ${clase}" title="${esc(dia + ': ' + detalle)}"></span>`);
   }
   const resumen = obsTotal ? `${(okTotal / obsTotal * 100).toFixed(1).replace('.', ',')} %` : '—';
-  return `<div class="dias">${casillas.join('')}</div><small>${esc(resumen)} en 14 días</small>`;
+  return `<div class="dias">${casillas.join('')}</div><small>${esc(resumen)} en 14 días, de ${HORA_INI}:00 a ${HORA_FIN}:00</small>`;
 }
 
 function validarLatido(d) {
