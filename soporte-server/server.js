@@ -441,6 +441,7 @@ function paginaClinicas() {
 </div>
 ${historialModal()}`, `
 <script>
+function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function abrirHistorial(id) {
   fetch('/api/historial/' + id)
     .then(r => r.json())
