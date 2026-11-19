@@ -82,10 +82,13 @@ nav{margin-bottom:14px;font-size:15px}nav a{margin-right:14px;color:#2b6cb0;text
 .chip{display:inline-block;padding:2px 10px;border-radius:12px;font-weight:600;font-size:13px;white-space:nowrap}
 .ok{background:#dcfce7;color:#166534}.warning{background:#fef3c7;color:#92400e}.conectando{background:#dbeafe;color:#1e40af}
 .desconectado{background:#fee2e2;color:#991b1b}.offline{background:#4b5563;color:#fff}.apagada{background:#e5e7eb;color:#374151}
+.riesgo-alto{background:#fecaca;color:#991b1b}.riesgo-medio{background:#fef3c7;color:#92400e}.riesgo-bajo{background:#dcfce7;color:#166534}
 .dias{display:flex;gap:2px;margin-bottom:2px}.dia{display:inline-block;width:9px;height:20px;border-radius:2px;background:#e5e7eb}
 .d-ok{background:#22c55e}.d-aviso{background:#f59e0b}.d-mal{background:#ef4444}.sd{background:#e5e7eb}
 .historial{margin:4px 0 0;padding-left:18px;font-size:12px;color:#444}.historial li{margin:2px 0}
-.resumen{margin:0 0 14px}.resumen .chip{margin-right:8px}a.accion{font-size:12px;margin-left:8px;color:#2b6cb0}`;
+.resumen{margin:0 0 14px}.resumen .chip{margin-right:8px}a.accion{font-size:12px;margin-left:8px;color:#2b6cb0}
+.alerta{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px}
+.alerta small{color:#991b1b}`;
 
 function plantilla(titulo, activa, cuerpo, extra = '') {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -222,8 +225,32 @@ function validarLatido(d) {
   return {
     id: d.id, estado: d.estado, host: cad(d.host, 60), version: cad(d.version, 20), canal: cad(d.canal, 20), motor: cad(d.motor, 20),
     causa: cad(d.causa, 200), ultimoError: cad(d.ultimoError, 200),
-    ultimoOk: Number.isFinite(d.ultimoOk) ? d.ultimoOk : null, arranqueHaceSeg: Number.isFinite(d.arranqueHaceSeg) ? Math.round(d.arranqueHaceSeg) : null
+    ultimoOk: Number.isFinite(d.ultimoOk) ? d.ultimoOk : null, arranqueHaceSeg: Number.isFinite(d.arranqueHaceSeg) ? Math.round(d.arranqueHaceSeg) : null,
+    // Datos técnicos para evaluación de riesgos
+    cpu: Number.isFinite(d.cpu) ? Math.round(d.cpu) : null,
+    memMB: Number.isFinite(d.memMB) ? Math.round(d.memMB) : null,
+    citas: Number.isFinite(d.citas) ? Math.round(d.citas) : null,
+    enNube: d.enNube === true
   };
+}
+
+// ---------- Evaluación de riesgo ----------
+// Calcula un nivel de riesgo (alto/medio/bajo) para cada clínica basado en múltiples factores.
+// Se actualiza en tiempo real con cada latido.
+const RIESGO_ORDEN = { alto: 0, medio: 1, bajo: 2 };
+function calcularRiesgo(c, ahora) {
+  const sinSenal = ahora - c.ultimo;
+  // Alto: desconectado >2h, sin señal, en nube, o memoria muy alta
+  if (c.enNube) return 'alto';
+  if (sinSenal > OFFLINE_MS && c.estado !== 'apagada') return 'alto';
+  if ((c.estado === 'desconectado' || c.estado === 'error') && sinSenal > 2 * 3600e3) return 'alto';
+  if (c.memMB != null && c.memMB > 2000) return 'alto'; // >2GB RAM
+  // Medio: degradado, conectando >10min, versión desactualizada, canal main
+  if (c.estado === 'degradado') return 'medio';
+  if (c.estado === 'conectando' && sinSenal > CONECTANDO_MAX_MS) return 'medio';
+  if (c.cpu != null && c.cpu > 80) return 'medio'; // CPU alta
+  // Bajo: conectado y estable
+  return 'bajo';
 }
 
 // false si ya hay MAX_CLINICAS instalaciones y esta es nueva
@@ -264,29 +291,62 @@ function historialHtml(c) {
   return `<details><summary><small>historial (${c.cambios.length})</small></summary><ul class="historial">${lineas}</ul></details>`;
 }
 
+// Alertas proactivas: problemas que requieren atención inmediata
+function alertasProactivas() {
+  const ahora = Date.now();
+  const alertas = [];
+  for (const c of Object.values(clinicas)) {
+    if (c.enNube) {
+      alertas.push(`<b>${esc(c.alias || c.host)}</b>: la aplicación está en un directorio sincronizado en la nube (OneDrive/Dropbox/Google Drive). Riesgo alto de corrupción de datos.`);
+    }
+    if (ahora - c.ultimo > 24 * 3600e3 && c.estado !== 'apagada') {
+      alertas.push(`<b>${esc(c.alias || c.host)}</b>: lleva más de 24 horas sin señal. Posible problema grave.`);
+    }
+    if (c.memMB != null && c.memMB > 2000) {
+      alertas.push(`<b>${esc(c.alias || c.host)}</b>: consume más de 2 GB de RAM (${c.memMB} MB). Posible fuga de memoria.`);
+    }
+  }
+  if (alertas.length === 0) return '';
+  return `<div class="alerta"><strong>⚠️ Alertas:</strong><br>${alertas.join('<br>')}</div>`;
+}
+
 // Solo lo que cambia (resumen y tabla): la pagina lo pide cada pocos segundos y lo sustituye
 function contenidoClinicas() {
   const ahora = Date.now();
   const filas = Object.values(clinicas)
-    .map((c) => ({ c, v: estadoVisible(c, ahora) }))
-    .sort((a, b) => ORDEN[a.v] - ORDEN[b.v] || String(a.c.alias || a.c.host).localeCompare(String(b.c.alias || b.c.host)));
+    .map((c) => ({ c, v: estadoVisible(c, ahora), riesgo: calcularRiesgo(c, ahora) }))
+    .sort((a, b) => RIESGO_ORDEN[a.riesgo] - RIESGO_ORDEN[b.riesgo] || ORDEN[a.v] - ORDEN[b.v] || String(a.c.alias || a.c.host).localeCompare(String(b.c.alias || b.c.host)));
   const cuenta = {};
   for (const { v } of filas) cuenta[v] = (cuenta[v] || 0) + 1;
-  const resumen = Object.keys(ORDEN).filter((v) => cuenta[v]).map((v) => `<span class="chip ${v}">${cuenta[v]} ${esc(ETIQUETA[v])}</span>`).join('');
-  const html = filas.map(({ c, v }) => `<tr>
+  const cuentaRiesgo = {};
+  for (const { riesgo } of filas) cuentaRiesgo[riesgo] = (cuentaRiesgo[riesgo] || 0) + 1;
+  const resumen = filas.length === 0 ? 'Aún no ha llegado ningún latido.'
+    : Object.keys(ORDEN).filter((v) => cuenta[v]).map((v) => `<span class="chip ${v}">${cuenta[v]} ${esc(ETIQUETA[v])}</span>`).join('');
+  const resumenRiesgo = filas.length === 0 ? ''
+    : Object.keys(RIESGO_ORDEN).filter((r) => cuentaRiesgo[r]).map((r) => `<span class="chip riesgo-${r}">${cuentaRiesgo[r]} riesgo ${esc(r)}</span>`).join('');
+  const html = filas.map(({ c, v, riesgo }) => {
+    const tecnico = [];
+    if (c.cpu != null) tecnico.push(`CPU ${c.cpu}%`);
+    if (c.memMB != null) tecnico.push(`RAM ${c.memMB} MB`);
+    if (c.citas != null) tecnico.push(`${c.citas} citas`);
+    const tecnicoHtml = tecnico.length ? `<br><small>${tecnico.join(' · ')}</small>` : '';
+    return `<tr>
 <td><span class="chip ${v}">${esc(ETIQUETA[v])}</span></td>
+<td><span class="chip riesgo-${riesgo}">riesgo ${esc(riesgo)}</span></td>
 <td><b>${esc(c.alias || c.host || 'sin nombre')}</b>${c.alias ? `<br><small>${esc(c.host)}</small>` : ''}<br><small title="${esc(c.id)}">${esc(c.id.slice(0, 8))}</small>
 <a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}">olvidar</a>
 ${diagnosticoHtml(c, v, ahora)}</td>
-<td>${esc(detalle(c, v, ahora))}</td>
+<td>${esc(detalle(c, v, ahora))}${tecnicoHtml}</td>
 <td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
 <td>${esc(hace(ahora - c.ultimo))}</td>
 <td>${esc(c.desdeEstado ? hace(ahora - c.desdeEstado) : '')}</td>
 <td>${graficaDias(c, ahora)}</td>
-<td><small>${esc(c.ip)}</small>${historialHtml(c)}</td></tr>`);
-  return `<h1>Clínicas (${filas.length})</h1>
-<p class="resumen">${resumen || 'Aún no ha llegado ningún latido.'}</p>
-<table><tr><th>Estado</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>Últimos 14 días</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=8>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
+<td><small>${esc(c.ip)}</small>${historialHtml(c)}</td></tr>`;
+  });
+  const alertas = alertasProactivas();
+  return `${alertas}<h1>Clínicas (${filas.length})</h1>
+<p class="resumen">${resumen} ${resumenRiesgo ? '<br>' + resumenRiesgo : ''}</p>
+<table><tr><th>Estado</th><th>Riesgo</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>Últimos 14 días</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=9>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
 <p><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos.</small></p>`;
 }
 

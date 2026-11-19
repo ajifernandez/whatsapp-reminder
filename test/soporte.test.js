@@ -29,7 +29,7 @@ const ID2 = 'a1b2c3d4-0000-4000-8000-000000000002';
 const ID3 = 'a1b2c3d4-0000-4000-8000-000000000003';
 const ID4 = 'a1b2c3d4-0000-4000-8000-000000000004';
 const ID5 = 'a1b2c3d4-0000-4000-8000-000000000005';
-const base = (id, extra = {}) => ({ id, host: 'PC-' + id.slice(-1), version: '2.4.0', canal: 'main', motor: 'baileys', estado: 'conectado', ...extra });
+const base = (id, extra = {}) => ({ id, host: 'PC-' + id.slice(-1), version: '2.4.0', canal: 'main', motor: 'wwebjs', estado: 'conectado', ...extra });
 const ok = (n) => console.log('OK  ' + n);
 const dirsTemporales = [];
 
@@ -66,10 +66,12 @@ const dirsTemporales = [];
     }
     assert.match(pagina, /La red funciona pero WhatsApp no responde/);
     assert.match(pagina, /Sesión desconectada: LOGOUT/);
-    // orden por gravedad: desconectado, con problemas, conectando, ok, apagada
+    // orden por riesgo primero (medio antes que bajo), luego por gravedad dentro del mismo riesgo
+    // CLINICA-AVISO (degradado → riesgo medio) va antes que el resto (riesgo bajo)
+    // Dentro de riesgo bajo: desconectado, conectando, ok, apagada
     const pos = (h) => pagina.indexOf(h);
-    assert.ok(pos('CLINICA-CAIDA') < pos('CLINICA-AVISO') && pos('CLINICA-AVISO') < pos('CLINICA-CONECTANDO') && pos('CLINICA-CONECTANDO') < pos('CLINICA-OK') && pos('CLINICA-OK') < pos('CLINICA-CERRADA'));
-    ok('estados OK / con problemas / desconectado / conectando / apagada, con detalle y ordenados por gravedad');
+    assert.ok(pos('CLINICA-AVISO') < pos('CLINICA-CAIDA') && pos('CLINICA-CAIDA') < pos('CLINICA-CONECTANDO') && pos('CLINICA-CONECTANDO') < pos('CLINICA-OK') && pos('CLINICA-OK') < pos('CLINICA-CERRADA'));
+    ok('estados OK / con problemas / desconectado / conectando / apagada, con detalle y ordenados por riesgo y gravedad');
 
     // --- sin señal: dejan de llegar latidos (las apagadas siguen "apagadas", no son una caída)
     await pausa(2300);
@@ -264,6 +266,82 @@ const dirsTemporales = [];
     assert.equal(ultimo, 429);
     assert.equal((await r.latido(base(ID2))).status, 200, 'otra instalación no se ve afectada');
     ok('límite de 40 latidos/hora por instalación; las demás no se ven afectadas');
+  } finally { await r.parar(); }
+
+  // --- riesgo automático: bajo para clínica conectada
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-BAJA', estado: 'conectado' }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo bajo/, 'clínica conectada → riesgo bajo');
+    await r.latido(base(ID2, { host: 'CLINICA-MEDIA', estado: 'degradado', causa: 'x' }));
+    pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo medio/, 'clínica degradada → riesgo medio');
+    // orden: riesgo alto primero, luego medio, luego bajo
+    const filaMedia = pagina.split('<tr>').find((f) => f.includes('CLINICA-MEDIA'));
+    const filaBaja = pagina.split('<tr>').find((f) => f.includes('CLINICA-BAJA'));
+    assert.ok(filaMedia && filaBaja && pagina.indexOf('CLINICA-MEDIA') < pagina.indexOf('CLINICA-BAJA'), 'riesgo medio antes que bajo');
+    ok('riesgo automático: bajo para conectada, medio para degradada, ordenado por riesgo');
+  } finally { await r.parar(); }
+
+  // --- riesgo alto: en nube
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-NUBE', estado: 'conectado', enNube: true }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo alto/, 'en nube → riesgo alto');
+    assert.match(pagina, /sincronizado en la nube/, 'alerta de nube');
+    ok('riesgo alto por estar en la nube con alerta proactiva');
+  } finally { await r.parar(); }
+
+  // --- riesgo alto: sin señal
+  r = await arrancar({ env: { OFFLINE_MIN: '0.03' } }); // 1.8 s
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-SIN-Senal', estado: 'conectado' }));
+    await pausa(2300);
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo alto/, 'sin señal → riesgo alto');
+    ok('riesgo alto por sin señal');
+  } finally { await r.parar(); }
+
+  // --- datos técnicos en la tabla
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-TECNICA', estado: 'conectado', cpu: 45, memMB: 512, citas: 23 }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    const fila = pagina.split('<tr>').find((f) => f.includes('CLINICA-TECNICA'));
+    assert.ok(fila && fila.includes('CPU 45%'), 'CPU en la tabla');
+    assert.ok(fila && fila.includes('RAM 512 MB'), 'RAM en la tabla');
+    assert.ok(fila && fila.includes('23 citas'), 'citas en la tabla');
+    ok('datos técnicos (CPU, RAM, citas) visibles en la tabla');
+  } finally { await r.parar(); }
+
+  // --- resumen de riesgo en la página
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-A', estado: 'conectado' }));
+    await r.latido(base(ID2, { host: 'CLINICA-B', estado: 'conectado' }));
+    await r.latido(base(ID3, { host: 'CLINICA-C', estado: 'degradado', causa: 'x' }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /2 riesgo bajo/, 'resumen: 2 bajo');
+    assert.match(pagina, /1 riesgo medio/, 'resumen: 1 medio');
+    ok('resumen de riesgo en la página');
+  } finally { await r.parar(); }
+
+  // --- alerta: memoria alta
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-MEM', estado: 'conectado', memMB: 3000 }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo alto/, 'memoria alta → riesgo alto');
+    assert.match(pagina, /más de 2 GB de RAM/, 'alerta de memoria');
+    ok('alerta proactiva por memoria alta');
   } finally { await r.parar(); }
 
   for (const d of dirsTemporales) fs.rmSync(d, { recursive: true, force: true });

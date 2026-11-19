@@ -11,16 +11,9 @@ const CITAS_PATH = path.join(DATA_DIR, 'citas.json');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const LOG_PATH = path.join(DATA_DIR, 'app.log');
 const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
-// Motor de WhatsApp (motores/*.js). Se elige con "motor" en data/config.json o desde la
-// pagina (/api/motor). Cada motor tiene su propia sesion: al cambiar hay que vincular.
-const MOTORES = { wwebjs: './motores/wwebjs', baileys: './motores/baileys' };
-const NOMBRES_MOTOR = { wwebjs: 'whatsapp-web.js (recomendado)', baileys: 'Baileys (experimental)' };
-// whatsapp-web.js para todas. Baileys es experimental: con el algunos moviles no llegan a descifrar
-// los mensajes y se quedan en «Esperando el mensaje…» (fallo abierto en Baileys, octubre 2026), asi
-// que solo se usa si alguien lo elige a mano en el selector (motorElegido).
+// Motor de WhatsApp (motores/*.js). Usa whatsapp-web.js.
 const MOTOR_POR_DEFECTO = 'wwebjs';
-const motorDe = (datos) => (datos.motor === 'baileys' && datos.motorElegido !== true ? MOTOR_POR_DEFECTO
-  : Object.hasOwn(MOTORES, datos.motor) ? datos.motor : MOTOR_POR_DEFECTO);
+const MOTOR_PATH = './motores/wwebjs';
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -129,7 +122,7 @@ function leerConfig() {
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
       autoEnvio: false, // v3: envío siempre manual, nunca automático
-      motor: motorDe(datos),
+      motor: MOTOR_POR_DEFECTO,
       motorElegido: datos.motorElegido === true,
       latido: datos.latido !== false,
       clinica, mensajes, onboardingCompletado
@@ -143,7 +136,7 @@ function guardarConfig(config) {
   const actual = leerConfig();
   const mensaje = typeof config?.mensaje === 'string' && config.mensaje.trim() ? config.mensaje : actual.mensaje;
   const autoEnvio = typeof config?.autoEnvio === 'boolean' ? config.autoEnvio : actual.autoEnvio;
-  const motor = Object.hasOwn(MOTORES, config?.motor) ? config.motor : actual.motor;
+  const motor = actual.motor; // v3: solo un motor, no se cambia
   const motorElegido = typeof config?.motorElegido === 'boolean' ? config.motorElegido : actual.motorElegido;
   const latido = typeof config?.latido === 'boolean' ? config.latido : actual.latido;
   // Branding (v3)
@@ -257,8 +250,6 @@ function formatearMensaje(cita, plantilla = plantillaParaCita(cita, leerConfig()
 
 // ---------- Cliente WhatsApp (lo propio de cada libreria vive en motores/) ----------
 let Motor = null; // se carga al arrancar, tras comprobar que no faltan ficheros (ver arrancar())
-// motores con su sesion: para el selector de la pagina y el aviso de revincular
-const listaMotores = () => Object.keys(MOTORES).map((id) => ({ id, nombre: NOMBRES_MOTOR[id], vinculado: require(MOTORES[id]).sesionGuardada() }));
 // log del motor: ui=true tambien lo muestra en la pagina
 const logMotor = (tipo, texto, ui = false) => (ui ? emitir('log', { tipo, texto }) : registrarLog(tipo, texto));
 
@@ -785,31 +776,7 @@ app.post('/api/remove-logo', (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores(), salud: datosSalud() }));
-
-// Cambio de motor desde la pagina: corta la conexion actual (cada motor tiene su sesion)
-// y, si el nuevo ya esta vinculado, conecta con el.
-app.post('/api/motor', (req, res) => {
-  const id = String((req.body || {}).motor || '');
-  if (!Object.hasOwn(MOTORES, id)) return res.status(400).json({ error: 'Motor desconocido' });
-  if (client) {
-    pararTemporizadorConexion();
-    client.descartar();
-    client = null;
-  }
-  conectando = false;
-  clientReady = false;
-  terminarSalud('cambio de motor');
-  Motor = require(MOTORES[id]);
-  guardarConfig({ motor: id, motorElegido: true }); // elegido a mano: se respeta (incluido Baileys)
-  emitir('estado', 'desconectado');
-  emitir('log', { tipo: 'info', texto: `Motor cambiado a ${NOMBRES_MOTOR[id]}.` + (Motor.sesionGuardada() ? ' Conectando con su sesión guardada...' : ' Pulsa «Conectar WhatsApp» y vincula el móvil.') });
-  if (Motor.sesionGuardada()) {
-    ultimoIntentoConexion = 0; // cambio explicito: sin esperar el cooldown
-    iniciarSesion();
-  }
-  res.json({ motor: id, motores: listaMotores() });
-});
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, salud: datosSalud() }));
 
 // El log lleva nombres y telefonos de pacientes: se quitan antes de sacarlo del equipo.
 function anonimizar(linea) {
@@ -840,6 +807,33 @@ const INSTALACION_PATH = path.join(DATA_DIR, 'instalacion.json');
 let idCache = null;
 let latidoFalla = false;
 let latidoTimer = null;
+// CPU del proceso: se mide cada latido comparando con el valor anterior
+let cpuUsageAnterior = process.cpuUsage();
+let cpuTiempoAnterior = process.hrtime.bigint();
+
+// Uso de CPU del proceso en porcentaje (0-100)
+function cpuDelProceso() {
+  const ahora = process.hrtime.bigint();
+  const cpu = process.cpuUsage();
+  const deltaCpu = (BigInt(cpu.user) - cpuUsageAnterior.user) + (BigInt(cpu.system) - cpuUsageAnterior.system);
+  const deltaTiempo = Number(ahora - cpuTiempoAnterior) / 1e9; // segundos
+  cpuUsageAnterior = cpu;
+  cpuTiempoAnterior = ahora;
+  if (deltaTiempo <= 0) return 0;
+  // porcentaje sobre todos los núcleos
+  const nucleos = require('os').cpus().length;
+  return Math.min(100, Math.round(deltaCpu / deltaTiempo / 1e6 * 100 / nucleos));
+}
+
+// Memoria del proceso en MB (RSS)
+function memoriaProcesoMB() {
+  return Math.round(process.memoryUsage().rss / 1048576);
+}
+
+// ¿La app está en un directorio sincronizado en la nube? (riesgo de corrupción)
+function estaEnNube() {
+  return /onedrive|dropbox|google ?drive|icloud/i.test(__dirname);
+}
 
 function idInstalacion() {
   if (idCache) return idCache;
@@ -882,7 +876,9 @@ async function enviarLatidoAhora(estado) {
         id: idInstalacion(), host: require('os').hostname(), version: updater.versionEnEjecucion(), canal: updater.canal(),
         motor: Motor && Motor.nombre, estado: estado || estadoActual(), causa: salud.causa,
         ultimoError: ultimoError ? anonimizar(ultimoError).slice(0, 200) : null, ultimoOk: salud.ultimoOk,
-        arranqueHaceSeg: Math.round(process.uptime())
+        arranqueHaceSeg: Math.round(process.uptime()),
+        // Datos técnicos para evaluación de riesgos
+        cpu: cpuDelProceso(), memMB: memoriaProcesoMB(), citas: leerCitas().length, enNube: estaEnNube()
       })
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -954,14 +950,26 @@ async function informeDiagnostico() {
   let omitidas = 0;
   while (log.length > 80 && Buffer.byteLength(log.join('\n')) > 200 * 1024) { log.shift(); omitidas++; }
   if (omitidas) log.unshift(`[${omitidas} líneas más antiguas de esta ejecución omitidas por tamaño]`);
+  // Archivos en data/ para detectar corrupción o archivos inesperados
+  let archivosData = [];
+  try {
+    archivosData = fs.readdirSync(DATA_DIR).map((n) => {
+      const stat = fs.statSync(path.join(DATA_DIR, n));
+      return { nombre: n, tamano: stat.size, esDirectorio: stat.isDirectory() };
+    }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  } catch (_) { /* sin data/ */ }
+  const enNube = estaEnNube();
   return {
     version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
+    // Datos técnicos del proceso
+    cpu: cpuDelProceso(), memMB: memoriaProcesoMB(),
     citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(), envios, lineasDesdeArranque,
     latido: { activo: Boolean(LATIDO_URL) && leerConfig().latido, id: idInstalacion(), fallando: latidoFalla },
     ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
-    redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
+    redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube, discoLibreMB,
+    archivosData,
     log: log.map(anonimizar)
   };
 }
@@ -991,20 +999,6 @@ app.post('/api/enviar-diagnostico', async (_req, res) => {
 
 app.post('/api/conectar', (_req, res) => { iniciarSesion(); res.json({ ok: true }); });
 
-// Vincular sin cámara (solo motores que lo admiten, p. ej. Baileys): con «Conectar»
-// ya pulsado, devuelve el código que se introduce en el móvil.
-app.post('/api/vincular-codigo', async (req, res) => {
-  if (!client || typeof client.pedirCodigo !== 'function') return res.status(400).json({ error: 'Pulsa antes «Conectar WhatsApp» (o este motor no admite código).' });
-  const numero = normalizarTelefono((req.body || {}).telefono || '');
-  if (numero.length < 10) return res.status(400).json({ error: 'Escribe el número del móvil que vas a vincular' });
-  try {
-    const codigo = await client.pedirCodigo(numero);
-    emitir('log', { tipo: 'info', texto: 'Código de vinculación generado. Introdúcelo en el móvil: WhatsApp → Dispositivos vinculados → Vincular con el número de teléfono.' });
-    res.json({ codigo });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
 
 // Cierre controlado desde la página (el mismo que Ctrl+C). Solo desde la propia
 // página: cualquier web abierta en el PC podría mandar este POST a localhost.
@@ -1147,16 +1141,9 @@ async function arrancar() {
   } catch (err) {
     registrarLog('error', `Faltan ficheros de la aplicación y no se pudieron descargar (${err.message}). Conecta a internet y vuelve a abrirla.`);
   }
-  // Entre 2.2.0 y 2.4.0 Baileys era el motor por defecto de las instalaciones nuevas y quedaba guardado sin
-  // que nadie lo eligiera: se pasan a whatsapp-web.js una sola vez y se deja anotado.
-  try {
-    const crudo = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    if (crudo.motor === 'baileys' && crudo.motorElegido !== true) {
-      guardarConfig({ motor: MOTOR_POR_DEFECTO, motorElegido: false });
-      registrarLog('aviso', 'Se usa whatsapp-web.js en lugar de Baileys (experimental: algunos móviles no reciben los mensajes). Si no está vinculado, pulsa «Conectar WhatsApp» y vincula el móvil.');
-    }
-  } catch (_) { /* sin config.json: valores por defecto */ }
-  Motor = require(MOTORES[leerConfig().motor]);
+  // Asegurar que config.json existe antes de arrancar el servidor
+  leerConfig();
+  Motor = require(MOTOR_PATH);
 
   server = app.listen(PORT, () => {
     console.log('==================================================');
@@ -1170,9 +1157,7 @@ async function arrancar() {
       registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
       iniciarSesion();
     } else {
-      // motor sin sesión pero con otro vinculado: la sesión de un motor no sirve para el otro
-      const otro = listaMotores().find((m) => m.vinculado);
-      if (otro) emitir('log', { tipo: 'aviso', texto: `Esta versión usa ${NOMBRES_MOTOR[Motor.nombre]}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»).` + (otro.id === 'baileys' ? '' : ` Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`) });
+      emitir('log', { tipo: 'aviso', texto: 'No hay sesión de WhatsApp guardada. Pulsa «Conectar WhatsApp» y vincula el móvil.' });
     }
   });
 

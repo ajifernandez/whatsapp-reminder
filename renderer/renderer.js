@@ -26,20 +26,6 @@ const api = {
   removeLogo: () => fetch('/api/remove-logo', { method: 'POST' }).then((r) => r.json()),
   conectar: () => fetch('/api/conectar', { method: 'POST' }),
   cerrarSesion: () => fetch('/api/cerrar', { method: 'POST' }),
-  cambiarMotor: (motor) => fetch('/api/motor', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motor })
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'No se pudo cambiar el motor');
-    return data;
-  }),
-  pedirCodigo: (telefono) => fetch('/api/vincular-codigo', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telefono })
-  }).then(async (r) => {
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'No se pudo obtener el código');
-    return data.codigo;
-  }),
   enviar: (c) => fetch('/api/enviar', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -519,36 +505,6 @@ $('btnConectar').addEventListener('click', () => {
 
 $('btnCerrar').addEventListener('click', () => api.cerrarSesion());
 
-// Selector de motor: cada uno tiene su propia vinculación con el móvil.
-let motorActual = null;
-function pintarMotores(actual, motores) {
-  motorActual = actual;
-  $('selMotor').innerHTML = motores.map((m) => `<option value="${m.id}"${m.id === actual ? ' selected' : ''}>${m.nombre}${m.vinculado ? ' · vinculado' : ''}</option>`).join('');
-  // vincular con código: solo el motor Baileys lo admite
-  $('vincularCodigo').classList.toggle('oculto', actual !== 'baileys');
-}
-
-$('selMotor').addEventListener('change', async () => {
-  const sel = $('selMotor');
-  const nuevo = sel.value;
-  const aviso = conectado ? ' Se cortará la conexión actual.' : '';
-  const experimental = nuevo === 'baileys'
-    ? '\n\nATENCIÓN: Baileys es experimental. Con él, algunos móviles no llegan a recibir los mensajes (se quedan en «Esperando el mensaje»). No lo uses para los recordatorios de pacientes.'
-    : '';
-  if (!confirm(`¿Cambiar el motor de WhatsApp?${aviso} Si el nuevo motor no está vinculado, habrá que vincular el móvil.${experimental}`)) {
-    sel.value = motorActual;
-    return;
-  }
-  try {
-    const r = await api.cambiarMotor(nuevo);
-    pintarMotores(r.motor, r.motores);
-    $('qrCaja').classList.add('oculto');
-    toast('Motor cambiado.', 'ok');
-  } catch (err) {
-    sel.value = motorActual;
-    toast(err.message, 'error');
-  }
-});
 
 // Cierre controlado: mejor que cerrar la ventana negra, que puede dejar procesos colgados.
 $('btnApagar').addEventListener('click', async () => {
@@ -567,19 +523,6 @@ $('btnApagar').addEventListener('click', async () => {
   }
 });
 
-$('btnCodigo').addEventListener('click', async () => {
-  const btn = $('btnCodigo');
-  btn.disabled = true;
-  try {
-    const codigo = await api.pedirCodigo($('telVincular').value);
-    // formato del móvil: XXXX-XXXX
-    $('codigoVincular').textContent = codigo.length === 8 ? codigo.slice(0, 4) + '-' + codigo.slice(4) : codigo;
-  } catch (err) {
-    toast(err.message, 'error');
-  } finally {
-    btn.disabled = false;
-  }
-});
 
 $('btnEnviar').addEventListener('click', async () => {
   if (!conectado) return;
@@ -1321,7 +1264,6 @@ function conectarEventos() {
   // v3: autoEnvio siempre false, no hay checkbox
   $('chkLatido').checked = config.latido !== false;
   pintarTabla();
-  pintarMotores(estadoInicial.motor, estadoInicial.motores || []);
 
   // v3: branding y configuración avanzada
   aplicarBranding(config);
@@ -1336,14 +1278,6 @@ function conectarEventos() {
     $('modalOnboarding').classList.remove('oculto');
   }
 
-  // motor sin sesión pero con otro motor vinculado: avisar al abrir la página
-  const motores = estadoInicial.motores || [];
-  const actual = motores.find((m) => m.id === estadoInicial.motor);
-  const otro = motores.find((m) => m.vinculado && m.id !== estadoInicial.motor);
-  if (actual && !actual.vinculado && otro && !operativo(estadoInicial.estado)) {
-    log(`Esta versión usa ${actual.nombre}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»).`
-      + (otro.id === 'baileys' ? '' : ` Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`), 'aviso');
-  }
   if (estadoInicial.version) {
     $('versionTexto').textContent = 'v' + estadoInicial.version;
   }
