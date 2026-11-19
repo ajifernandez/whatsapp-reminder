@@ -95,7 +95,17 @@ function guardarCitas(citas) {
 }
 
 function leerConfig() {
-  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: MOTOR_POR_DEFECTO, motorElegido: false, latido: true };
+  const configBase = {
+    mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: MOTOR_POR_DEFECTO, motorElegido: false, latido: true,
+    // Branding personalizable (v3)
+    clinica: { nombre: '', logo: '', colorPrimario: '' },
+    // Mensajes por especialidad (v3)
+    mensajes: null,
+    // Horarios de envío (v3): ventanas como [{desde:'09:00', hasta:'13:00'}, {desde:'16:00', hasta:'20:00'}]
+    horariosEnvio: null,
+    // Antelación configurable (v3): horas antes de la cita (por defecto 24)
+    horasAntelacion: 24
+  };
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(configBase, null, 2), 'utf8');
     return configBase;
@@ -103,12 +113,31 @@ function leerConfig() {
 
   try {
     const datos = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    // clinica: objeto con nombre, logo, colorPrimario
+    const clinica = typeof datos.clinica === 'object' && datos.clinica != null
+      ? {
+          nombre: typeof datos.clinica.nombre === 'string' ? datos.clinica.nombre : '',
+          logo: typeof datos.clinica.logo === 'string' ? datos.clinica.logo : '',
+          colorPrimario: typeof datos.clinica.colorPrimario === 'string' ? datos.clinica.colorPrimario : ''
+        }
+      : { nombre: '', logo: '', colorPrimario: '' };
+    // mensajes: objeto con plantillas por especialidad, o null para usar mensaje global
+    const mensajes = datos.mensajes != null && typeof datos.mensajes === 'object' && !Array.isArray(datos.mensajes)
+      ? datos.mensajes : null;
+    // horariosEnvio: array de {desde, hasta} o null para sin restricción
+    const horariosEnvio = Array.isArray(datos.horariosEnvio)
+      ? datos.horariosEnvio.filter((h) => typeof h?.desde === 'string' && typeof h?.hasta === 'string')
+      : null;
+    // horasAntelacion: número entero positivo
+    const horasAntelacion = (typeof datos.horasAntelacion === 'number' && datos.horasAntelacion > 0 && datos.horasAntelacion <= 168)
+      ? datos.horasAntelacion : 24;
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
       autoEnvio: datos.autoEnvio === true,
       motor: motorDe(datos),
       motorElegido: datos.motorElegido === true,
-      latido: datos.latido !== false // avisar a soporte del estado: activado salvo que se desactive
+      latido: datos.latido !== false,
+      clinica, mensajes, horariosEnvio, horasAntelacion
     };
   } catch (_) {
     return configBase;
@@ -122,7 +151,25 @@ function guardarConfig(config) {
   const motor = Object.hasOwn(MOTORES, config?.motor) ? config.motor : actual.motor;
   const motorElegido = typeof config?.motorElegido === 'boolean' ? config.motorElegido : actual.motorElegido;
   const latido = typeof config?.latido === 'boolean' ? config.latido : actual.latido;
-  const nuevo = { ...actual, mensaje, autoEnvio, motor, motorElegido, latido };
+  // Branding (v3)
+  const clinica = typeof config?.clinica === 'object' && config.clinica != null
+    ? {
+        nombre: typeof config.clinica.nombre === 'string' ? config.clinica.nombre : '',
+        logo: typeof config.clinica.logo === 'string' ? config.clinica.logo : '',
+        colorPrimario: typeof config.clinica.colorPrimario === 'string' ? config.clinica.colorPrimario : ''
+      }
+    : actual.clinica;
+  // Mensajes por especialidad (v3)
+  const mensajes = config?.mensajes != null && typeof config.mensajes === 'object' && !Array.isArray(config.mensajes)
+    ? config.mensajes : actual.mensajes;
+  // Horarios de envío (v3)
+  const horariosEnvio = Array.isArray(config?.horariosEnvio)
+    ? config.horariosEnvio.filter((h) => typeof h?.desde === 'string' && typeof h?.hasta === 'string')
+    : actual.horariosEnvio;
+  // Antelación (v3)
+  const horasAntelacion = (typeof config?.horasAntelacion === 'number' && config.horasAntelacion > 0 && config.horasAntelacion <= 168)
+    ? config.horasAntelacion : actual.horasAntelacion;
+  const nuevo = { ...actual, mensaje, autoEnvio, motor, motorElegido, latido, clinica, mensajes, horariosEnvio, horasAntelacion };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nuevo, null, 2), 'utf8');
   return nuevo;
 }
@@ -192,7 +239,20 @@ function normalizarHoraA24(horaStr) {
   return limpia;
 }
 
-function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
+// Selecciona la plantilla: si hay mensajes por especialidad (v3), busca coincidencia; si no, usa el global
+function plantillaParaCita(cita, config) {
+  const especialidad = limpiarString(cita.especialidad);
+  if (config.mensajes && especialidad && typeof config.mensajes[especialidad] === 'string') {
+    return config.mensajes[especialidad];
+  }
+  // Si hay mensajes por especialidad con "default" como fallback
+  if (config.mensajes && typeof config.mensajes.default === 'string') {
+    return config.mensajes.default;
+  }
+  return config.mensaje;
+}
+
+function formatearMensaje(cita, plantilla = plantillaParaCita(cita, leerConfig())) {
   const valores = {
     nombre: limpiarString(cita.nombre),
     telefono: limpiarString(cita.telefono),
@@ -603,11 +663,19 @@ async function enviarRecordatorios(citas) {
   return { enviados, fallidos, omitidos, sinRespuesta, total: lista.length };
 }
 
-// ---------- Envío automático (24 h antes de la cita) ----------
-const HORAS_ANTELACION = 24;
+// ---------- Envío automático (horasAntelacion antes de la cita, configurable en v3) ----------
 const INTERVALO_AUTO_MS = Number(process.env.INTERVALO_AUTO_MS) || 45 * 1000; // variable: solo para pruebas
 const PAUSA_AUTO_SIN_RESPUESTA_MS = 5 * 60 * 1000;
 let autoPausadoHasta = 0;
+
+// Comprueba si la hora actual está dentro de las ventanas de envío configuradas (v3)
+// Si no hay horarios configurados, siempre devuelve true (sin restricción)
+function dentroHorarioEnvio(horariosEnvio) {
+  if (!horariosEnvio || horariosEnvio.length === 0) return true;
+  const ahora = new Date();
+  const horaActual = String(ahora.getHours()).padStart(2, '0') + ':' + String(ahora.getMinutes()).padStart(2, '0');
+  return horariosEnvio.some((h) => horaActual >= h.desde && horaActual <= h.hasta);
+}
 
 function fechaHoraCita(cita) {
   const fLimpia = limpiarString(cita.fecha);
@@ -645,8 +713,12 @@ async function cicloAutoEnvio() {
   const config = leerConfig();
   if (!config.autoEnvio) return;
 
+  // Horarios de envío (v3): si están configurados, solo enviar dentro de las ventanas
+  if (!dentroHorarioEnvio(config.horariosEnvio)) return;
+
+  const horasAntelacion = config.horasAntelacion || 24;
   const ahora = Date.now();
-  const limite = ahora + HORAS_ANTELACION * 3600 * 1000;
+  const limite = ahora + horasAntelacion * 3600 * 1000;
   const pendientes = leerCitas().filter((c) => {
     // estadoEnvio: ya intentado (enviado/fallido/omitido); recordatorioEnviado: compatibilidad con ficheros antiguos
     if (c.estadoEnvio || c.recordatorioEnviado || !c.telefono) return false;
@@ -657,11 +729,11 @@ async function cicloAutoEnvio() {
 
   autoEnvioEnCurso = true;
   try {
-    emitir('log', { tipo: 'info', texto: `Envío automático: ${pendientes.length} cita(s) a menos de ${HORAS_ANTELACION} h.` });
+    emitir('log', { tipo: 'info', texto: `Envío automático: ${pendientes.length} cita(s) a menos de ${horasAntelacion} h.` });
     for (let i = 0; i < pendientes.length; i++) {
       if (!clientReady) break;
       if (i > 0) await pausa(2500 + Math.random() * 2500);
-      const resultado = await enviarUna(pendientes[i], config.mensaje);
+      const resultado = await enviarUna(pendientes[i], plantillaParaCita(pendientes[i], config));
       contarEnvio(resultado);
       if (resultado === 'sin_respuesta') {
         // no es culpa de la cita: sin marcar, y se espera antes de volver a intentarlo
@@ -718,6 +790,37 @@ app.post('/api/citas', (req, res) => {
 app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
+
+// Exportar citas a CSV (v3)
+app.get('/api/exportar-csv', (_req, res) => {
+  const citas = leerCitas();
+  const encabezados = ['nombre', 'telefono', 'fecha', 'hora', 'especialidad', 'estadoEnvio'];
+  const filas = citas.map((c) =>
+    encabezados.map((h) => {
+      const val = String(c[h] ?? '');
+      // Escapar comillas y envolver en comillas si contiene comas o saltos
+      return val.includes(',') || val.includes('"') || val.includes('\n')
+        ? '"' + val.replace(/"/g, '""') + '"'
+        : val;
+    }).join(',')
+  );
+  const csv = [encabezados.join(','), ...filas].join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="citas.csv"');
+  res.send('\uFEFF' + csv); // BOM para Excel
+});
+
+// Servir logo de la clínica (v3)
+app.get('/api/logo', (req, res) => {
+  const config = leerConfig();
+  if (!config.clinica.logo) return res.status(404).json({ error: 'Sin logo configurado' });
+  const logoPath = path.join(__dirname, config.clinica.logo);
+  if (!fs.existsSync(logoPath)) return res.status(404).json({ error: 'Logo no encontrado' });
+  // Seguridad: el archivo debe estar dentro del directorio de la app
+  const resuelto = path.resolve(logoPath);
+  if (!resuelto.startsWith(__dirname)) return res.status(403).json({ error: 'Ruta no permitida' });
+  res.sendFile(resuelto);
+});
 
 app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores(), salud: datosSalud() }));
 

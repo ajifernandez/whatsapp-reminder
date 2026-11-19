@@ -312,3 +312,114 @@ td input:focus { border-color: var(--azul); background: #fff; outline: none; }
 .toast.ok { border-left-color: #1e9e5a; }
 .toast.aviso { border-left-color: #d97706; }
 .toast.error { border-left-color: #d93025; }
+
+/* ---------- Branding (v3) ---------- */
+.logo-imagen {
+  height: 36px;
+  width: auto;
+  max-width: 120px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+/* ---------- Configuración avanzada (v3) ---------- */
+details.config-avanzado-summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--azul);
+  margin-top: 12px;
+  padding: 8px 0;
+}
+details.config-avanzado-summary:focus { outline: none; }
+.config-avanzado-cuerpo {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--borde);
+}
+.config-avanzado-cuerpo h3 {
+  font-size: 14px;
+  margin: 14px 0 8px;
+  color: var(--texto);
+}
+.config-avanzado-cuerpo h3:first-child { margin-top: 0; }
+.config-fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.config-fila label {
+  font-size: 14px;
+  color: var(--texto);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.config-fila input[type="text"] {
+  border: 1px solid var(--gris-osc);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 14px;
+  width: 220px;
+}
+.config-fila input[type="color"] {
+  width: 40px;
+  height: 32px;
+  border: 1px solid var(--gris-osc);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 2px;
+}
+.config-fila input[type="number"] {
+  border: 1px solid var(--gris-osc);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 14px;
+  width: 80px;
+}
+.config-ayuda {
+  font-size: 13px;
+  color: var(--texto-sub);
+  margin: 4px 0 8px;
+}
+.config-botones {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--borde);
+}
+.config-horario-fila, .config-mensaje-fila {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.config-horario-fila input, .config-mensaje-fila input {
+  border: 1px solid var(--gris-osc);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 14px;
+}
+.config-horario-fila input[type="time"] { width: 110px; }
+.config-mensaje-fila input[type="text"] { width: 160px; }
+.config-mensaje-fila textarea {
+  flex: 1;
+  min-width: 200px;
+  border: 1px solid var(--gris-osc);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 32px;
+}
+.btn-quitar-config {
+  background: none;
+  border: none;
+  color: var(--rojo);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.btn-quitar-config:hover { background: #fee2e2; }

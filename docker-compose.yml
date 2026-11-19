@@ -1,0 +1,34 @@
+# WhatsApp Reminder v3 - Despliegue en VPS
+#
+# Uso:
+#   docker compose up -d
+#   docker compose logs -f
+#
+# La primera vez, abre http://TU_SERVIDOR:3000 en el navegador
+# y vincula WhatsApp escaneando el QR.
+
+services:
+  whatsapp-reminder:
+    build: .
+    container_name: whatsapp-reminder
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Datos persistentes: citas, config, etc.
+      - data:/app/data
+      # Sesión de WhatsApp (para no volver a vincular)
+      - session:/app/.wwebjs_auth
+      # Cache de Chromium
+      - cache:/app/.wwebjs_cache
+    environment:
+      - PORT=3000
+      # Desactiva los latidos a soporte si no quieres
+      # - LATIDO_URL=
+      # Desactiva el envío de diagnóstico si no quieres
+      # - DIAG_URL=
+
+volumes:
+  data:
+  session:
+  cache:

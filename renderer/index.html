@@ -9,10 +9,11 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">💬</span>
+      <span class="logo" id="logoIcono">💬</span>
+      <img id="logoImagen" class="logo-imagen oculto" alt="Logo de la clínica" />
       <div>
-        <h1>Recordatorios WhatsApp</h1>
-        <p class="sub">Envía recordatorios de citas con un clic</p>
+        <h1 id="tituloApp">Recordatorios WhatsApp</h1>
+        <p class="sub" id="subtituloApp">Envía recordatorios de citas con un clic</p>
       </div>
     </div>
     <div class="estado">
@@ -94,9 +95,46 @@
       </div>
       <label class="auto-envio oculto">
         <input type="checkbox" id="chkAutoEnvio" />
-        Enviar automáticamente 24 h antes de cada cita
+        Enviar automáticamente <span id="autoEnvioHoras">24</span> h antes de cada cita
         <span class="auto-envio-nota">(la app debe quedar abierta y WhatsApp conectado)</span>
       </label>
+
+      <!-- Configuración avanzada (v3) -->
+      <details id="configAvanzado" class="oculto">
+        <summary class="config-avanzado-summary">⚙️ Configuración avanzada</summary>
+        <div class="config-avanzado-cuerpo">
+          <h3>Branding de la clínica</h3>
+          <div class="config-fila">
+            <label>Nombre de la clínica: <input type="text" id="clinicaNombre" placeholder="Ej. Clínica San José" /></label>
+          </div>
+          <div class="config-fila">
+            <label>Color principal: <input type="color" id="clinicaColor" value="#25D366" /></label>
+          </div>
+          <div class="config-fila">
+            <label>Logo (ruta en data/): <input type="text" id="clinicaLogo" placeholder="Ej. data/logo.png" /></label>
+            <button type="button" id="btnLimpiarLogo" class="btn btn-gris pequeno">Quitar logo</button>
+          </div>
+
+          <h3>Antelación del recordatorio</h3>
+          <div class="config-fila">
+            <label>Horas antes de la cita: <input type="number" id="horasAntelacion" min="1" max="168" value="24" /></label>
+          </div>
+
+          <h3>Horarios de envío</h3>
+          <p class="config-ayuda">Deja vacío para enviar a cualquier hora. Si configuras horarios, los recordatorios automáticos solo se envían en esas ventanas.</p>
+          <div id="horariosEnvioLista"></div>
+          <button type="button" id="btnAnadirHorario" class="btn btn-gris pequeno">+ Añadir horario</button>
+
+          <h3>Mensajes por especialidad</h3>
+          <p class="config-ayuda">Si dejas vacío, se usa el mensaje global de arriba para todas las especialidades.</p>
+          <div id="mensajesEspecialidadLista"></div>
+          <button type="button" id="btnAnadirMensajeEsp" class="btn btn-gris pequeno">+ Añadir especialidad</button>
+
+          <div class="config-botones">
+            <button type="button" id="btnGuardarConfigAvanzada" class="btn btn-verde">💾 Guardar configuración</button>
+          </div>
+        </div>
+      </details>
     </section>
 
     <!-- Panel de citas -->
@@ -107,6 +145,7 @@
           <button id="btnPegar" class="btn btn-azul">📋 Importar citas (Excel, PDF o imagen)</button>
           <button id="btnAnadir" class="btn btn-gris">+ Añadir fila</button>
           <button id="btnVaciar" class="btn btn-gris" disabled>🗑 Vaciar lista</button>
+          <button id="btnExportarCsv" class="btn btn-gris oculto">📥 Exportar CSV</button>
           <button id="btnEnviar" class="btn btn-verde" disabled>📤 Enviar recordatorios</button>
         </div>
       </div>

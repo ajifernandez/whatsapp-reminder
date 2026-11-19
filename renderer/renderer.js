@@ -19,6 +19,7 @@ const api = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(c)
   }).then((r) => r.json()),
+  exportarCsv: () => fetch('/api/exportar-csv'),
   conectar: () => fetch('/api/conectar', { method: 'POST' }),
   cerrarSesion: () => fetch('/api/cerrar', { method: 'POST' }),
   cambiarMotor: (motor) => fetch('/api/motor', {
@@ -901,7 +902,168 @@ $('btnImportar').addEventListener('click', () => {
   log(`Importadas ${filas.length} cita(s) desde texto o imagen.`, 'ok');
 });
 
-// ---------- Eventos en vivo del servidor (SSE) ----------
+// ---------- Branding (v3) ----------
+function aplicarBranding(config) {
+  const clinica = config.clinica;
+  if (!clinica) return;
+
+  // Nombre de la clínica
+  if (clinica.nombre) {
+    $('tituloApp').textContent = clinica.nombre;
+    document.title = clinica.nombre;
+    $('subtituloApp').textContent = 'Recordatorios de citas por WhatsApp';
+  }
+
+  // Color principal
+  if (clinica.colorPrimario) {
+    document.documentElement.style.setProperty('--verde', clinica.colorPrimario);
+    // Calcular un tono más oscuro para hover
+    const hex = clinica.colorPrimario.replace('#', '');
+    const r = Math.max(0, parseInt(hex.substring(0, 2), 16) - 30);
+    const g = Math.max(0, parseInt(hex.substring(2, 4), 16) - 30);
+    const b = Math.max(0, parseInt(hex.substring(4, 6), 16) - 30);
+    document.documentElement.style.setProperty('--verde-osc', `rgb(${r},${g},${b})`);
+  }
+
+  // Logo
+  if (clinica.logo) {
+    $('logoImagen').src = '/api/logo?' + Date.now();
+    $('logoImagen').classList.remove('oculto');
+    $('logoIcono').classList.add('oculto');
+  }
+}
+
+// ---------- Configuración avanzada UI (v3) ----------
+function cargarConfigAvanzada(config) {
+  // Branding
+  if (config.clinica) {
+    $('clinicaNombre').value = config.clinica.nombre || '';
+    $('clinicaColor').value = config.clinica.colorPrimario || '#25D366';
+    $('clinicaLogo').value = config.clinica.logo || '';
+  }
+
+  // Antelación
+  $('horasAntelacion').value = config.horasAntelacion || 24;
+  $('autoEnvioHoras').textContent = config.horasAntelacion || 24;
+
+  // Horarios de envío
+  const horariosLista = $('horariosEnvioLista');
+  horariosLista.innerHTML = '';
+  if (config.horariosEnvio && config.horariosEnvio.length) {
+    config.horariosEnvio.forEach((h, i) => {
+      agregarHorarioFila(horariosLista, h.desde, h.hasta);
+    });
+  }
+
+  // Mensajes por especialidad
+  const mensajesLista = $('mensajesEspecialidadLista');
+  mensajesLista.innerHTML = '';
+  if (config.mensajes) {
+    Object.entries(config.mensajes).forEach(([esp, msg]) => {
+      if (esp !== 'default') agregarMensajeFila(mensajesLista, esp, msg);
+    });
+  }
+}
+
+function agregarHorarioFila(contenedor, desde = '', hasta = '') {
+  const div = document.createElement('div');
+  div.className = 'config-horario-fila';
+  div.innerHTML = `
+    <input type="time" value="${desde}" />
+    <span>hasta</span>
+    <input type="time" value="${hasta}" />
+    <button type="button" class="btn-quitar-config" title="Quitar horario">✕</button>
+  `;
+  div.querySelector('.btn-quitar-config').addEventListener('click', () => div.remove());
+  contenedor.appendChild(div);
+}
+
+function agregarMensajeFila(contenedor, especialidad = '', mensaje = '') {
+  const div = document.createElement('div');
+  div.className = 'config-mensaje-fila';
+  div.innerHTML = `
+    <input type="text" value="${especialidad}" placeholder="Especialidad" />
+    <textarea placeholder="Mensaje para esta especialidad">${mensaje}</textarea>
+    <button type="button" class="btn-quitar-config" title="Quitar">✕</button>
+  `;
+  div.querySelector('.btn-quitar-config').addEventListener('click', () => div.remove());
+  contenedor.appendChild(div);
+}
+
+function recopilarConfigAvanzada() {
+  const clinica = {
+    nombre: $('clinicaNombre').value.trim(),
+    logo: $('clinicaLogo').value.trim(),
+    colorPrimario: $('clinicaColor').value
+  };
+
+  const horasAntelacion = parseInt($('horasAntelacion').value, 10);
+
+  // Horarios
+  const horariosEnvio = [];
+  $('horariosEnvioLista').querySelectorAll('.config-horario-fila').forEach((fila) => {
+    const inputs = fila.querySelectorAll('input[type="time"]');
+    if (inputs[0].value && inputs[1].value) {
+      horariosEnvio.push({ desde: inputs[0].value, hasta: inputs[1].value });
+    }
+  });
+
+  // Mensajes por especialidad
+  const mensajes = {};
+  $('mensajesEspecialidadLista').querySelectorAll('.config-mensaje-fila').forEach((fila) => {
+    const inputs = fila.querySelectorAll('input[type="text"]');
+    const textareas = fila.querySelectorAll('textarea');
+    if (inputs[0].value.trim() && textareas[0].value.trim()) {
+      mensajes[inputs[0].value.trim()] = textareas[0].value.trim();
+    }
+  });
+
+  return { clinica, horasAntelacion, horariosEnvio, mensajes };
+}
+
+// ---------- Event listeners v3 ----------
+$('btnAnadirHorario').addEventListener('click', () => agregarHorarioFila($('horariosEnvioLista')));
+$('btnAnadirMensajeEsp').addEventListener('click', () => agregarMensajeFila($('mensajesEspecialidadLista')));
+
+$('btnLimpiarLogo').addEventListener('click', () => {
+  $('clinicaLogo').value = '';
+});
+
+$('btnGuardarConfigAvanzada').addEventListener('click', async () => {
+  const avanzada = recopilarConfigAvanzada();
+  const configAGuardar = {
+    ...config,
+    clinica: avanzada.clinica,
+    horasAntelacion: avanzada.horasAntelacion,
+    horariosEnvio: avanzada.horariosEnvio.length ? avanzada.horariosEnvio : null,
+    mensajes: Object.keys(avanzada.mensajes).length ? avanzada.mensajes : null
+  };
+  try {
+    config = await api.guardarConfig(configAGuardar);
+    aplicarBranding(config);
+    $('autoEnvioHoras').textContent = config.horasAntelacion || 24;
+    toast('Configuración guardada.', 'ok');
+  } catch (err) {
+    toast('No se pudo guardar: ' + err.message, 'error');
+  }
+});
+
+// CSV Export
+$('btnExportarCsv').addEventListener('click', async () => {
+  try {
+    const r = await api.exportarCsv();
+    if (!r.ok) throw new Error('No se pudo exportar');
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'citas.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Citas exportadas a CSV.', 'ok');
+  } catch (err) {
+    toast('Error al exportar: ' + err.message, 'error');
+  }
+});
 function conectarEventos() {
   const es = new EventSource('/api/events');
   es.addEventListener('qr', (e) => {
@@ -942,6 +1104,14 @@ function conectarEventos() {
   $('chkLatido').checked = config.latido !== false;
   pintarTabla();
   pintarMotores(estadoInicial.motor, estadoInicial.motores || []);
+
+  // v3: branding y configuración avanzada
+  aplicarBranding(config);
+  cargarConfigAvanzada(config);
+  // Mostrar los elementos v3
+  $('configAvanzado').classList.remove('oculto');
+  $('btnExportarCsv').classList.remove('oculto');
+
   // motor sin sesión pero con otro motor vinculado: avisar al abrir la página
   const motores = estadoInicial.motores || [];
   const actual = motores.find((m) => m.id === estadoInicial.motor);
