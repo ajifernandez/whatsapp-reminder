@@ -599,3 +599,26 @@ details.config-avanzado-summary:focus { outline: none; }
   border-color: var(--azul);
   outline: none;
 }
+
+/* Footer */
+.footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  font-size: 13px;
+  color: var(--texto-sub);
+  text-align: center;
+}
+.footer a {
+  color: var(--azul);
+  text-decoration: none;
+  font-weight: 500;
+}
+.footer a:hover {
+  text-decoration: underline;
+}
+.footer-separador {
+  color: var(--gris-osc);
+}
