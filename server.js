@@ -104,7 +104,9 @@ function leerConfig() {
     // Horarios de envío (v3): ventanas como [{desde:'09:00', hasta:'13:00'}, {desde:'16:00', hasta:'20:00'}]
     horariosEnvio: null,
     // Antelación configurable (v3): horas antes de la cita (por defecto 24)
-    horasAntelacion: 24
+    horasAntelacion: 24,
+    // Onboarding completado (v3)
+    onboardingCompletado: false
   };
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(configBase, null, 2), 'utf8');
@@ -131,13 +133,15 @@ function leerConfig() {
     // horasAntelacion: número entero positivo
     const horasAntelacion = (typeof datos.horasAntelacion === 'number' && datos.horasAntelacion > 0 && datos.horasAntelacion <= 168)
       ? datos.horasAntelacion : 24;
+    // onboardingCompletado: booleano
+    const onboardingCompletado = datos.onboardingCompletado === true;
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
-      autoEnvio: datos.autoEnvio === true,
+      autoEnvio: false, // v3: envío siempre manual, nunca automático
       motor: motorDe(datos),
       motorElegido: datos.motorElegido === true,
       latido: datos.latido !== false,
-      clinica, mensajes, horariosEnvio, horasAntelacion
+      clinica, mensajes, horariosEnvio, horasAntelacion, onboardingCompletado
     };
   } catch (_) {
     return configBase;
@@ -169,7 +173,10 @@ function guardarConfig(config) {
   // Antelación (v3)
   const horasAntelacion = (typeof config?.horasAntelacion === 'number' && config.horasAntelacion > 0 && config.horasAntelacion <= 168)
     ? config.horasAntelacion : actual.horasAntelacion;
-  const nuevo = { ...actual, mensaje, autoEnvio, motor, motorElegido, latido, clinica, mensajes, horariosEnvio, horasAntelacion };
+  // Onboarding (v3)
+  const onboardingCompletado = typeof config?.onboardingCompletado === 'boolean' ? config.onboardingCompletado : actual.onboardingCompletado;
+  // autoEnvio forzado a false en v3: envío siempre manual
+  const nuevo = { ...actual, mensaje, autoEnvio: false, motor, motorElegido, latido, clinica, mensajes, horariosEnvio, horasAntelacion, onboardingCompletado };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nuevo, null, 2), 'utf8');
   return nuevo;
 }
@@ -790,6 +797,17 @@ app.post('/api/citas', (req, res) => {
 app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
+
+// Estado del onboarding (v3): devuelve si se ha completado y datos útiles para el wizard
+app.get('/api/onboarding', (_req, res) => {
+  const config = leerConfig();
+  const citas = leerCitas();
+  res.json({
+    completado: config.onboardingCompletado,
+    clinicaNombre: config.clinica?.nombre || '',
+    tieneCitas: citas.length > 0
+  });
+});
 
 // Exportar citas a CSV (v3)
 app.get('/api/exportar-csv', (_req, res) => {

@@ -20,6 +20,7 @@ const api = {
     body: JSON.stringify(c)
   }).then((r) => r.json()),
   exportarCsv: () => fetch('/api/exportar-csv'),
+  onboarding: () => fetch('/api/onboarding').then((r) => r.json()),
   conectar: () => fetch('/api/conectar', { method: 'POST' }),
   cerrarSesion: () => fetch('/api/cerrar', { method: 'POST' }),
   cambiarMotor: (motor) => fetch('/api/motor', {
@@ -713,18 +714,7 @@ $('chkLatido').addEventListener('change', async () => {
   }
 });
 
-$('chkAutoEnvio').addEventListener('change', async () => {
-  config.autoEnvio = $('chkAutoEnvio').checked;
-  try {
-    config = await api.guardarConfig(config);
-    $('chkAutoEnvio').checked = !!config.autoEnvio;
-    log(config.autoEnvio
-      ? 'Envío automático activado: se avisará 24 h antes de cada cita.'
-      : 'Envío automático desactivado.', 'info');
-  } catch (err) {
-    log('No se pudo guardar la configuración: ' + err.message, 'error');
-  }
-});
+// v3: envío siempre manual, autoEnvio desactivado. No hay checkbox ni listener.
 
 // ---------- Importar desde archivo (PDF o imagen) ----------
 // Las librerías (pdf.js, tesseract.js) se sirven en local desde el propio
@@ -942,9 +932,8 @@ function cargarConfigAvanzada(config) {
     $('clinicaLogo').value = config.clinica.logo || '';
   }
 
-  // Antelación
+  // Antelación (se usa si alguien activa autoEnvio manualmente en config.json)
   $('horasAntelacion').value = config.horasAntelacion || 24;
-  $('autoEnvioHoras').textContent = config.horasAntelacion || 24;
 
   // Horarios de envío
   const horariosLista = $('horariosEnvioLista');
@@ -1041,7 +1030,6 @@ $('btnGuardarConfigAvanzada').addEventListener('click', async () => {
   try {
     config = await api.guardarConfig(configAGuardar);
     aplicarBranding(config);
-    $('autoEnvioHoras').textContent = config.horasAntelacion || 24;
     toast('Configuración guardada.', 'ok');
   } catch (err) {
     toast('No se pudo guardar: ' + err.message, 'error');
@@ -1064,6 +1052,143 @@ $('btnExportarCsv').addEventListener('click', async () => {
     toast('Error al exportar: ' + err.message, 'error');
   }
 });
+
+// ---------- Onboarding wizard (v3) ----------
+let onboardingPasoActual = 0;
+const TOTAL_ONBOARDING_PASOS = 5; // 0-4: bienvenida, clínica, WhatsApp, citas, listo
+
+function mostrarPasoOnboarding(paso) {
+  onboardingPasoActual = paso;
+  // Mostrar/ocultar contenido de cada paso
+  document.querySelectorAll('.onboarding-paso-contenido').forEach((el) => {
+    const p = parseInt(el.dataset.paso, 10);
+    el.classList.toggle('oculto', p !== paso);
+  });
+  // Actualizar indicadores de progreso
+  document.querySelectorAll('.onboarding-paso').forEach((el) => {
+    const p = parseInt(el.dataset.paso, 10);
+    el.classList.remove('activo', 'completado');
+    if (p === paso) el.classList.add('activo');
+    else if (p < paso) el.classList.add('completado');
+  });
+  // Botones de navegación
+  $('btnOnboardingAnterior').classList.toggle('oculto', paso === 0 || paso === TOTAL_ONBOARDING_PASOS - 1);
+  $('btnOnboardingSaltar').classList.toggle('oculto', paso === TOTAL_ONBOARDING_PASOS - 1);
+  const btnSig = $('btnOnboardingSiguiente');
+  if (paso === TOTAL_ONBOARDING_PASOS - 1) {
+    btnSig.textContent = '✅ Empezar';
+  } else if (paso === 2) {
+    // Paso WhatsApp: cambiar texto según estado
+    btnSig.textContent = conectado ? 'Siguiente →' : 'Conectar WhatsApp';
+  } else {
+    btnSig.textContent = 'Siguiente →';
+  }
+}
+
+function cerrarOnboarding() {
+  $('modalOnboarding').classList.add('oculto');
+}
+
+async function completarOnboarding() {
+  // Guardar nombre y color de clínica
+  const nombre = $('onboardingClinicaNombre').value.trim();
+  const color = $('onboardingClinicaColor').value;
+  if (nombre || color) {
+    config.clinica = {
+      nombre,
+      logo: config.clinica?.logo || '',
+      colorPrimario: color
+    };
+  }
+  // Marcar onboarding como completado
+  config.onboardingCompletado = true;
+  try {
+    config = await api.guardarConfig(config);
+    aplicarBranding(config);
+  } catch (err) {
+    console.error('No se pudo guardar la configuración del onboarding:', err);
+  }
+  cerrarOnboarding();
+}
+
+// Botón siguiente
+$('btnOnboardingSiguiente').addEventListener('click', async () => {
+  const paso = onboardingPasoActual;
+
+  if (paso === 2) {
+    // Paso WhatsApp: si no está conectado, iniciar conexión
+    if (!conectado) {
+      try {
+        await api.conectar();
+        log('Conectando WhatsApp… Escanea el código QR.', 'info');
+        // Esperar a que se conecte (máx 60s)
+        let intentos = 0;
+        while (!conectado && intentos < 120) {
+          await new Promise((r) => setTimeout(r, 500));
+          intentos++;
+        }
+        if (conectado) {
+          log('WhatsApp conectado.', 'ok');
+        }
+      } catch (err) {
+        log('Error al conectar WhatsApp: ' + err.message, 'error');
+      }
+    }
+    // Avanzar aunque no haya conectado (puede hacerlo después)
+    if (paso < TOTAL_ONBOARDING_PASOS - 1) {
+      mostrarPasoOnboarding(paso + 1);
+    }
+  } else if (paso === 3) {
+    // Paso citas: importar si hay texto
+    const texto = $('onboardingCitas').value.trim();
+    if (texto) {
+      const filas = parsearPegado(texto);
+      if (filas.length > 0) {
+        citas = filas;
+        guardar();
+        pintarTabla();
+        log(`Importadas ${filas.length} cita(s) desde el asistente.`, 'ok');
+      }
+    }
+    if (paso < TOTAL_ONBOARDING_PASOS - 1) {
+      mostrarPasoOnboarding(paso + 1);
+    }
+  } else if (paso === TOTAL_ONBOARDING_PASOS - 1) {
+    // Paso final: completar onboarding
+    await completarOnboarding();
+  } else {
+    mostrarPasoOnboarding(paso + 1);
+  }
+});
+
+// Botón atrás
+$('btnOnboardingAnterior').addEventListener('click', () => {
+  if (onboardingPasoActual > 0) {
+    mostrarPasoOnboarding(onboardingPasoActual - 1);
+  }
+});
+
+// Botón saltar
+$('btnOnboardingSaltar').addEventListener('click', async () => {
+  await completarOnboarding();
+});
+
+// Preview de citas en el onboarding
+$('onboardingCitas').addEventListener('input', () => {
+  const filas = parsearPegado($('onboardingCitas').value);
+  const prev = $('onboardingCitasPreview');
+  if (filas.length === 0) {
+    prev.textContent = '';
+    prev.className = 'pegar-preview';
+    return;
+  }
+  const incompletas = filas.filter((c) => !c.telefono || !c.fecha || !c.hora).length;
+  prev.textContent = `Se detectaron ${filas.length} cita(s)` +
+    (incompletas ? `, ${incompletas} con datos incompletos.` : '.');
+  prev.className = 'pegar-preview ' + (incompletas ? 'error' : 'ok');
+});
+
+// Escuchar estado de WhatsApp durante el paso 2 del onboarding
 function conectarEventos() {
   const es = new EventSource('/api/events');
   es.addEventListener('qr', (e) => {
@@ -1071,7 +1196,18 @@ function conectarEventos() {
     $('qrCaja').classList.remove('oculto');
     log('Código QR listo. Escanéalo con tu teléfono.', 'info');
   });
-  es.addEventListener('estado', (e) => setEstado(JSON.parse(e.data)));
+  es.addEventListener('estado', (e) => {
+    setEstado(JSON.parse(e.data));
+    // Si estamos en el paso 2 del onboarding, actualizar el estado
+    if (!$('modalOnboarding').classList.contains('oculto') && onboardingPasoActual === 2) {
+      const estadoEl = $('onboardingQrEstado');
+      if (conectado) {
+        estadoEl.textContent = '✅ WhatsApp conectado';
+        estadoEl.className = 'onboarding-estado';
+        $('btnOnboardingSiguiente').textContent = 'Siguiente →';
+      }
+    }
+  });
   es.addEventListener('salud', (e) => pintarSalud(JSON.parse(e.data)));
   es.addEventListener('citas', (e) => {
     // el servidor ha marcado resultados de envío: refrescar tabla
@@ -1092,15 +1228,16 @@ function conectarEventos() {
 
 // ---------- Arranque ----------
 (async function init() {
-  const [citasIniciales, configInicial, estadoInicial] = await Promise.all([
+  const [citasIniciales, configInicial, estadoInicial, onboardingInfo] = await Promise.all([
     api.listarCitas(),
     api.config(),
-    api.estado()
+    api.estado(),
+    api.onboarding().catch(() => ({ completado: true, clinicaNombre: '', tieneCitas: false }))
   ]);
   citas = citasIniciales;
   config = configInicial;
   $('mensajePlantilla').value = config.mensaje;
-  $('chkAutoEnvio').checked = !!config.autoEnvio;
+  // v3: autoEnvio siempre false, no hay checkbox
   $('chkLatido').checked = config.latido !== false;
   pintarTabla();
   pintarMotores(estadoInicial.motor, estadoInicial.motores || []);
@@ -1111,6 +1248,12 @@ function conectarEventos() {
   // Mostrar los elementos v3
   $('configAvanzado').classList.remove('oculto');
   $('btnExportarCsv').classList.remove('oculto');
+
+  // v3: Onboarding wizard — mostrar si no está completado
+  if (!onboardingInfo.completado) {
+    mostrarPasoOnboarding(0);
+    $('modalOnboarding').classList.remove('oculto');
+  }
 
   // motor sin sesión pero con otro motor vinculado: avisar al abrir la página
   const motores = estadoInicial.motores || [];
