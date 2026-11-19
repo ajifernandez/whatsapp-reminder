@@ -345,15 +345,33 @@ function diagnosticoHtml(c, v, ahora) {
   return accion + ultimo;
 }
 
-// Historial de transiciones (las ultimas 20) en un desplegable de la fila
+// Historial de transiciones: enlace que abre un modal
 function historialHtml(c) {
   if (!c.cambios || !c.cambios.length) return '';
+  return `<a href="#" class="accion" data-historial="${esc(c.id)}" title="Ver historial de estados">📜 Historial (${c.cambios.length})</a>`;
+}
+
+// Modal de historial (se inyecta en el HTML)
+function historialModal() {
+  return `<div id="modalHistorial" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div class="card" style="max-width:480px;width:90%;max-height:80vh;overflow:auto;position:relative">
+<button onclick="this.closest('div[style]').style.display='none'" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-secondary)">✕</button>
+<h2 style="margin:0 0 16px">📜 Historial de estados</h2>
+<div id="modalHistorialCuerpo"></div>
+</div></div>`;
+}
+
+function historialCuerpoHtml(c) {
+  if (!c.cambios || !c.cambios.length) return '<p style="color:var(--text-secondary)">Sin registros.</p>';
   const estadoClass = (e) => ({ conectado: 'ok', degradado: 'warning', conectando: 'conectando', desconectado: 'desconectado', error: 'desconectado', apagada: 'apagada' }[e] || 'offline');
   const lineas = c.cambios.slice().reverse().map((x) => {
-    const fecha = new Date(x.t).toLocaleString('es-ES', { timeZone: ZONA, dateStyle: 'short', timeStyle: 'short' });
-    return `<li><span class="chip ${estadoClass(x.estado)}" style="font-size:10px;padding:1px 6px">${esc(x.estado)}</span> ${esc(fecha)}</li>`;
+    const fecha = new Date(x.t).toLocaleString('es-ES', { timeZone: ZONA, dateStyle: 'short', timeStyle: 'medium' });
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+<span class="chip ${estadoClass(x.estado)}">${esc(x.estado)}</span>
+<span style="font-size:13px;color:var(--text-secondary)">${esc(fecha)}</span>
+</div>`;
   }).join('');
-  return `<details><summary><small>📜 Historial (${c.cambios.length})</small></summary><ul class="historial">${lineas}</ul></details>`;
+  return `<div style="padding:0 4px">${lineas}</div>`;
 }
 
 // Alertas proactivas: problemas que requieren atención inmediata
@@ -420,10 +438,31 @@ function paginaClinicas() {
 <div style="margin-top:16px;padding:12px 16px;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center">
 <small id="actualizado">🔄 Se actualiza sola cada ${REFRESCO_S} s.</small>
 <small style="color:var(--text-secondary)">Última actualización: <span id="ultimaHora">—</span></small>
-</div>`, `
+</div>
+${historialModal()}`, `
 <script>
+function abrirHistorial(id) {
+  fetch('/api/historial/' + id)
+    .then(r => r.json())
+    .then(data => {
+      const estadoClass = (e) => ({conectado:'ok',degradado:'warning',conectando:'conectando',desconectado:'desconectado',error:'desconectado',apagada:'apagada'}[e]||'offline');
+      const cuerpo = document.getElementById('modalHistorialCuerpo');
+      if (!data.cambios || !data.cambios.length) {
+        cuerpo.innerHTML = '<p style="color:var(--text-secondary)">Sin registros.</p>';
+      } else {
+        const lineas = data.cambios.slice().reverse().map((x) => {
+          const fecha = new Date(x.t).toLocaleString('es-ES', {dateStyle:'short',timeStyle:'medium'});
+          return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><span class="chip ' + estadoClass(x.estado) + '">' + esc(x.estado) + '</span><span style="font-size:13px;color:var(--text-secondary)">' + fecha + '</span></div>';
+        }).join('');
+        cuerpo.innerHTML = '<div style="padding:0 4px">' + lineas + '</div>';
+      }
+      const modal = document.getElementById('modalHistorial');
+      modal.style.display = 'flex';
+    });
+}
 document.addEventListener('click', async (e) => {
   const d = e.target.dataset || {};
+  if (d.historial) { e.preventDefault(); abrirHistorial(d.historial); return; }
   if (!d.renombrar && !d.olvidar && !d.pedir) return;
   e.preventDefault();
   let r;
@@ -492,6 +531,14 @@ http.createServer((req, res) => {
     if (!autorizar(req, res)) return;
     res.writeHead(302, { Location: '/clinicas' });
     return res.end();
+  }
+  if (req.method === 'GET' && url.pathname.match(/^\/api\/historial\/[a-f0-9-]{16,40}$/)) {
+    if (!autorizar(req, res)) return;
+    const id = url.pathname.split('/').pop();
+    const c = clinicas[id];
+    if (!c) return responder(res, 404, 'no encontrada');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ alias: c.alias || c.host, cambios: c.cambios || [] }));
   }
   if (req.method === 'GET' && (url.pathname === '/clinicas' || url.pathname === '/diagnosticos')) {
     if (!autorizar(req, res)) return;

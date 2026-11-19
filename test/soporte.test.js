@@ -164,25 +164,30 @@ const dirsTemporales = [];
     assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ version: '2.5.0', log: [] }) })).status, 200);
     ok('pedir diagnóstico: botón, solo con contraseña y origen propio, orden única en el latido, se cumple al llegar el informe y se enlaza');
 
-    // --- historial de transiciones por instalacion
+    // --- historial de transiciones por instalación (modal)
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'degradado', causa: 'x' }));
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
     pagina = await r.html('/clinicas?parcial=1');
     const filaAviso = pagina.split('<tr>').find((f) => f.includes('CLINICA-AVISO'));
-    assert.match(filaAviso, /Historial \(\d+\)/, 'hay desplegable de historial');
-    // Extrae solo del bloque <details> (historial), no de los chips de la fila principal
-    const detailsBlock = filaAviso.split('<details>')[1]?.split('</details>')[0] || '';
-    const items = [...detailsBlock.matchAll(/>conectado<\/span>|>degradado<\/span>|>conectando<\/span>|>desconectado<\/span>|>error<\/span>|>apagada<\/span>/g)].map((m) => m[0].slice(1, -7));
-    // la más reciente primero: conectado (la última), degradado, conectado (la primera)
-    assert.deepEqual(items.slice(0, 3), ['conectado', 'degradado', 'conectado'], 'orden: más reciente primero');
+    assert.match(filaAviso, /data-historial/, 'hay enlace de historial');
+    assert.match(filaAviso, /Historial \(\d+\)/, 'muestra el conteo de transiciones');
+    // verificar endpoint API de historial
+    const respHistorial = await r.pedir('/api/historial/' + ID2);
+    assert.equal(respHistorial.status, 200, 'endpoint historial devuelve 200');
+    const datosHistorial = await respHistorial.json();
+    assert.ok(datosHistorial.cambios && datosHistorial.cambios.length >= 3, 'tiene al menos 3 cambios');
+    const estadosReversos = datosHistorial.cambios.slice().reverse().map((x) => x.estado);
+    assert.deepEqual(estadosReversos.slice(0, 3), ['conectado', 'degradado', 'conectado'], 'orden: más reciente primero');
+    // endpoint para clínica inexistente
+    assert.equal((await r.pedir('/api/historial/a1b2c3d4-0000-4000-8000-0000000000ff')).status, 404, 'clínica inexistente devuelve 404');
     const filaOk = pagina.split('<tr>').find((f) => f.includes('CLINICA-OK'));
     const idCerrada = 'a1b2c3d4-0000-4000-8000-00000000000b';
     await r.latido(base(idCerrada, { host: 'CLINICA-SIN-CAMBIOS', estado: 'conectado' }));
     const filaSinCambios = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-SIN-CAMBIOS'));
     assert.ok(filaSinCambios.includes('Historial (1)'), 'el primer estado cuenta como una transición');
     assert.ok(filaOk && typeof filaOk === 'string', 'la fila OK existe');
-    ok('historial: cada instalación muestra sus últimas transiciones en un desplegable');
+    ok('historial: cada instalación muestra enlace al historial y el endpoint API devuelve los cambios en orden');
 
     // --- olvidar una instalación
     assert.equal((await r.pedir('/clinicas/' + ID4, { method: 'DELETE', headers: { Origin: 'https://otra-web.example' } })).status, 403);
