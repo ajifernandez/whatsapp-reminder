@@ -9,10 +9,11 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">💬</span>
+      <span class="logo" id="logoIcono">💬</span>
+      <img id="logoImagen" class="logo-imagen oculto" alt="Logo de la clínica" />
       <div>
-        <h1>Recordatorios WhatsApp</h1>
-        <p class="sub">Envía recordatorios de citas con un clic</p>
+        <h1 id="tituloApp">Recordatorios WhatsApp</h1>
+        <p class="sub" id="subtituloApp">Envía recordatorios de citas con un clic</p>
       </div>
     </div>
     <div class="estado">
@@ -66,19 +67,10 @@
           <input type="checkbox" id="chkLatido" checked />
           Avisar a soporte del estado de la conexión <span class="auto-envio-nota">(sin datos de pacientes)</span>
         </label>
-        <label class="selector-motor" title="Cómo se conecta la aplicación con WhatsApp. Cada motor tiene su propia vinculación.">
-          Motor: <select id="selMotor" class="pequeno"></select>
-        </label>
       </div>
       <div id="qrCaja" class="qr-caja oculto">
         <img id="qrImg" alt="Código QR" />
         <p class="qr-nota">Escanea este código con tu teléfono</p>
-        <div id="vincularCodigo" class="vincular-codigo oculto">
-          <p class="qr-nota">¿No puedes escanear? Vincula con un código:</p>
-          <input id="telVincular" type="tel" placeholder="Móvil a vincular (ej. 612345678)" autocomplete="off" />
-          <button id="btnCodigo" class="btn btn-azul pequeno">Obtener código</button>
-          <p id="codigoVincular" class="codigo-vincular"></p>
-        </div>
       </div>
     </section>
 
@@ -92,11 +84,41 @@
         <div class="mensaje-preview-titulo">Vista previa con la primera cita</div>
         <div id="mensajePreview" class="mensaje-preview-texto">Añade o importa una cita para ver la vista previa.</div>
       </div>
-      <label class="auto-envio oculto">
-        <input type="checkbox" id="chkAutoEnvio" />
-        Enviar automáticamente 24 h antes de cada cita
-        <span class="auto-envio-nota">(la app debe quedar abierta y WhatsApp conectado)</span>
-      </label>
+      <!-- v3: envío siempre manual, autoEnvio desactivado -->
+
+      <!-- Configuración avanzada (v3) -->
+      <details id="configAvanzado" class="oculto">
+        <summary class="config-avanzado-summary">⚙️ Configuración avanzada</summary>
+        <div class="config-avanzado-cuerpo">
+          <h3>Branding de la clínica</h3>
+          <div class="config-fila">
+            <label>Nombre de la clínica: <input type="text" id="clinicaNombre" placeholder="Ej. Clínica San José" /></label>
+          </div>
+          <div class="config-fila">
+            <label>Color principal: <input type="color" id="clinicaColor" value="#25D366" /></label>
+          </div>
+          <div class="config-fila">
+            <button type="button" id="btnSeleccionarLogo" class="btn btn-gris pequeno">📁 Seleccionar logo</button>
+            <input type="file" id="inputLogoFile" accept="image/png,image/jpeg,image/webp,image/gif" class="oculto" />
+            <span id="logoFileName" class="logo-file-name"></span>
+            <button type="button" id="btnLimpiarLogo" class="btn btn-gris pequeno">Quitar logo</button>
+          </div>
+          <div id="logoPreviewCaja" class="logo-preview-caja oculto">
+            <img id="logoPreviewImg" alt="Vista previa del logo" />
+            <p class="logo-preview-nota">Vista previa del logo</p>
+          </div>
+
+          <h3>Mensajes por especialidad</h3>
+          <p class="config-ayuda">Si dejas vacío, se usa el mensaje global de arriba para todas las especialidades.</p>
+          <div id="mensajesEspecialidadLista"></div>
+          <button type="button" id="btnAnadirMensajeEsp" class="btn btn-gris pequeno">+ Añadir especialidad</button>
+
+          <div class="config-botones">
+            <button type="button" id="btnGuardarConfigAvanzada" class="btn btn-verde">💾 Guardar configuración</button>
+            <button type="button" id="btnResetOnboarding" class="btn btn-gris pequeno">🔄 Repetir onboarding</button>
+          </div>
+        </div>
+      </details>
     </section>
 
     <!-- Panel de citas -->
@@ -107,6 +129,7 @@
           <button id="btnPegar" class="btn btn-azul">📋 Importar citas (Excel, PDF o imagen)</button>
           <button id="btnAnadir" class="btn btn-gris">+ Añadir fila</button>
           <button id="btnVaciar" class="btn btn-gris" disabled>🗑 Vaciar lista</button>
+          <button id="btnExportarCsv" class="btn btn-gris oculto">📥 Exportar CSV</button>
           <button id="btnEnviar" class="btn btn-verde" disabled>📤 Enviar recordatorios</button>
         </div>
       </div>
@@ -148,6 +171,14 @@
       <ul id="log" class="log"></ul>
     </section>
   </aside>
+
+  <footer class="footer">
+    <span>Hecho con ❤️ por <a href="https://github.com/ajifernandez" target="_blank" rel="noopener">Agustín Jiménez Fernández</a></span>
+    <span class="footer-separador">·</span>
+    <span>© 2026</span>
+    <span class="footer-separador">·</span>
+    <a href="https://github.com/ajifernandez/whatsapp-reminder" target="_blank" rel="noopener">GitHub</a>
+  </footer>
   </div>
 
   <!-- Modal: pegar desde Excel/CSV -->
@@ -187,6 +218,89 @@
   </div>
 
   <div id="toasts" class="toasts"></div>
+
+  <!-- Modal: Onboarding wizard (v3) -->
+  <div id="modalOnboarding" class="modal oculto">
+    <div class="modal-caja onboarding-caja">
+      <!-- Progreso del wizard -->
+      <div class="onboarding-progreso">
+        <div class="onboarding-pasos" id="onboardingPasos">
+          <span class="onboarding-paso activo" data-paso="0">1</span>
+          <span class="onboarding-paso" data-paso="1">2</span>
+          <span class="onboarding-paso" data-paso="2">3</span>
+          <span class="onboarding-paso" data-paso="3">4</span>
+        </div>
+      </div>
+
+      <!-- Paso 0: Bienvenida -->
+      <div class="onboarding-paso-contenido" data-paso="0">
+        <div class="onboarding-icono">💬</div>
+        <h2>Bienvenido a Recordatorios WhatsApp</h2>
+        <p>Te ayudaremos a configurar la aplicación en solo unos minutos. Al final podrás enviar recordatorios de citas a tus pacientes con un clic.</p>
+        <p class="onboarding-nota">⚡ El envío de recordatorios es <b>manual</b>: tú decides cuándo enviar cada recordatorio. No hay envíos programados automáticos.</p>
+      </div>
+
+      <!-- Paso 1: Nombre de la clínica -->
+      <div class="onboarding-paso-contenido oculto" data-paso="1">
+        <h2>🏥 ¿Cómo se llama tu clínica?</h2>
+        <p>Personalizaremos la aplicación con el nombre de tu centro.</p>
+        <div class="onboarding-campo">
+          <label for="onboardingClinicaNombre">Nombre de la clínica</label>
+          <input type="text" id="onboardingClinicaNombre" placeholder="Ej. Clínica San José" />
+        </div>
+        <div class="onboarding-campo">
+          <label for="onboardingClinicaColor">Color principal <span class="pequeno-txt">(opcional)</span></label>
+          <input type="color" id="onboardingClinicaColor" value="#25D366" />
+        </div>
+      </div>
+
+      <!-- Paso 2: Conectar WhatsApp -->
+      <div class="onboarding-paso-contenido oculto" data-paso="2">
+        <h2>📱 Conecta tu WhatsApp</h2>
+        <p>Para enviar recordatorios, la aplicación necesita conectarse a tu WhatsApp. Pulsa <b>Conectar WhatsApp</b> y escanea el código QR con tu móvil.</p>
+        <p class="onboarding-instrucciones"><b>WhatsApp → Ajustes → Dispositivos vinculados → Vincular dispositivo</b></p>
+        <button id="btnOnboardingConectar" class="btn btn-verde">Conectar WhatsApp</button>
+        <div id="onboardingQrCaja" class="qr-caja oculto" style="margin-top:16px;">
+          <img id="onboardingQrImg" alt="Código QR" />
+          <p class="qr-nota">Escanea este código con tu teléfono</p>
+        </div>
+        <div id="onboardingQrEstado" class="onboarding-estado esperando">Esperando conexión…</div>
+      </div>
+
+      <!-- Paso 3: Importar citas -->
+      <div class="onboarding-paso-contenido oculto" data-paso="3">
+        <h2>📋 Importa tus citas</h2>
+        <p>Copia las citas desde Excel, un PDF o escríbelas a mano. Una cita por línea:</p>
+        <code class="modal-orden">nombre · fecha · teléfono · hora · especialidad</code>
+        <textarea id="onboardingCitas" rows="6" placeholder="Ana García	03/07/2026	34612345678	10:30	revisión&#10;Carlos López	03/07/2026	34687654321	17:00	nutrición"></textarea>
+        <p id="onboardingCitasPreview" class="pegar-preview"></p>
+      </div>
+
+      <!-- Paso 4: Listo -->
+      <div class="onboarding-paso-contenido oculto" data-paso="4">
+        <div class="onboarding-icono">✅</div>
+        <h2>¡Todo listo!</h2>
+        <p>Tu aplicación está configurada. Ahora puedes:</p>
+        <ul class="onboarding-lista">
+          <li>📤 <b>Enviar recordatorios</b> a las citas importadas con un clic</li>
+          <li>📋 <b>Importar más citas</b> desde Excel, PDF o imagen</li>
+          <li>✏️ <b>Editar el mensaje</b> de recordatorio</li>
+          <li>⚙️ <b>Personalizar</b> colores y mensajes por especialidad en Configuración avanzada</li>
+        </ul>
+        <p class="onboarding-nota">💡 Cada vez que abras la aplicación, solo necesitarás tener WhatsApp conectado para enviar recordatorios.</p>
+      </div>
+
+      <!-- Botones de navegación -->
+      <div class="onboarding-navegacion">
+        <button id="btnOnboardingAnterior" class="btn btn-gris oculto">← Atrás</button>
+        <div class="onboarding-botones-derecha">
+          <button id="btnOnboardingSaltar" class="btn btn-gris pequeno">Saltar</button>
+          <button id="btnOnboardingSiguiente" class="btn btn-verde">Siguiente →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="parser.js"></script>
   <script src="renderer.js"></script>
 </body>

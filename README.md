@@ -4,6 +4,8 @@ App web local para enviar recordatorios de citas por WhatsApp. Funciona en **Win
 
 Usa [`whatsapp-web.js`](https://github.com/pedroslopez/whatsapp-web.js) por debajo.
 
+**Autor**: [Agustín Jiménez Fernández](https://github.com/ajifernandez) · © 2026
+
 ## Qué hace
 
 - Tabla visual para añadir, editar y borrar citas (se guarda sola).

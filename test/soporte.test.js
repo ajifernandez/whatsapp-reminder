@@ -29,7 +29,7 @@ const ID2 = 'a1b2c3d4-0000-4000-8000-000000000002';
 const ID3 = 'a1b2c3d4-0000-4000-8000-000000000003';
 const ID4 = 'a1b2c3d4-0000-4000-8000-000000000004';
 const ID5 = 'a1b2c3d4-0000-4000-8000-000000000005';
-const base = (id, extra = {}) => ({ id, host: 'PC-' + id.slice(-1), version: '2.4.0', canal: 'main', motor: 'baileys', estado: 'conectado', ...extra });
+const base = (id, extra = {}) => ({ id, host: 'PC-' + id.slice(-1), version: '2.4.0', canal: 'main', motor: 'wwebjs', estado: 'conectado', ...extra });
 const ok = (n) => console.log('OK  ' + n);
 const dirsTemporales = [];
 
@@ -66,16 +66,23 @@ const dirsTemporales = [];
     }
     assert.match(pagina, /La red funciona pero WhatsApp no responde/);
     assert.match(pagina, /Sesión desconectada: LOGOUT/);
-    // orden por gravedad: desconectado, con problemas, conectando, ok, apagada
+    // orden por riesgo primero (medio antes que bajo), luego por gravedad dentro del mismo riesgo
+    // CLINICA-AVISO (degradado → riesgo medio) va antes que el resto (riesgo bajo)
+    // Dentro de riesgo bajo: desconectado, conectando, ok, apagada
     const pos = (h) => pagina.indexOf(h);
-    assert.ok(pos('CLINICA-CAIDA') < pos('CLINICA-AVISO') && pos('CLINICA-AVISO') < pos('CLINICA-CONECTANDO') && pos('CLINICA-CONECTANDO') < pos('CLINICA-OK') && pos('CLINICA-OK') < pos('CLINICA-CERRADA'));
-    ok('estados OK / con problemas / desconectado / conectando / apagada, con detalle y ordenados por gravedad');
+    assert.ok(pos('CLINICA-AVISO') < pos('CLINICA-CAIDA') && pos('CLINICA-CAIDA') < pos('CLINICA-CONECTANDO') && pos('CLINICA-CONECTANDO') < pos('CLINICA-OK') && pos('CLINICA-OK') < pos('CLINICA-CERRADA'));
+    ok('estados OK / con problemas / desconectado / conectando / apagada, con detalle y ordenados por riesgo y gravedad');
 
     // --- sin señal: dejan de llegar latidos (las apagadas siguen "apagadas", no son una caída)
     await pausa(2300);
     await r.latido(base(ID1, { host: 'CLINICA-OK' })); // esta sigue viva
     pagina = await r.html('/clinicas');
-    const claseDe = (host) => /class="chip (\w+)"/.exec(pagina.split('<tr>').find((f) => f.includes(host)))[1];
+    const claseDe = (host) => {
+      const fila = pagina.split('<tr>').find((f) => f.includes(host));
+      // Extrae el primer chip de estado del primer <td> (evita el chip de riesgo en el segundo <td>)
+      const td = fila.split('<td>')[1];
+      return /class="chip (\w+)"/.exec(td)[1];
+    };
     assert.equal(claseDe('CLINICA-OK'), 'ok');
     assert.equal(claseDe('CLINICA-AVISO'), 'offline');
     assert.equal(claseDe('CLINICA-CAIDA'), 'offline');
@@ -121,7 +128,8 @@ const dirsTemporales = [];
     ok('host y causa con HTML salen escapados');
 
     // --- no se mezclan con los diagnósticos
-    assert.match(await r.html('/diagnosticos'), /Diagnósticos recibidos \(0,/);
+    assert.match(await r.html('/diagnosticos'), /Diagnósticos recibidos/);
+    assert.match(await r.html('/diagnosticos'), /0 informes/);
     assert.ok(!(await r.html('/diagnosticos')).includes('clinicas.json'));
     ok('el estado de las clínicas no aparece en la lista de diagnósticos');
 
@@ -141,14 +149,14 @@ const dirsTemporales = [];
     await pedir(ID1);
     assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, orden, 'pedir otra vez no duplica: sigue la misma orden');
     let fila = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-OK'));
-    assert.match(fila, /diagnóstico pedido/); assert.ok(!fila.includes('data-pedir'), 'pendiente: sin botón');
+    assert.match(fila, /Diagnóstico pedido/); assert.ok(!fila.includes('data-pedir'), 'pendiente: sin botón');
     assert.match(fila, /en el próximo latido/);
     // llega el informe (con el id de la instalación): cumple la petición y se enlaza a la fila
     const informe = { version: '2.5.0', estado: 'conectado', log: [], latido: { id: ID1 } };
     assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ ...informe, host: 'CLINICA-OK' }) })).status, 200);
     assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, null, 'cumplida: ya no se pide');
     fila = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-OK'));
-    const enlace = /último diagnóstico: <a href="\/f\/([^"]+)">/.exec(fila);
+    const enlace = /Último: <a href="\/f\/([^"]+)"/.exec(fila);
     assert.ok(enlace, 'enlace al último diagnóstico'); assert.match(fila, /data-pedir/, 'vuelve el botón');
     assert.equal((await r.pedir('/f/' + enlace[1])).status, 200, 'el enlace abre el informe');
     // un informe de una instalación desconocida o sin id no rompe nada
@@ -156,23 +164,30 @@ const dirsTemporales = [];
     assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ version: '2.5.0', log: [] }) })).status, 200);
     ok('pedir diagnóstico: botón, solo con contraseña y origen propio, orden única en el latido, se cumple al llegar el informe y se enlaza');
 
-    // --- historial de transiciones por instalacion
+    // --- historial de transiciones por instalación (modal)
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'degradado', causa: 'x' }));
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
     pagina = await r.html('/clinicas?parcial=1');
     const filaAviso = pagina.split('<tr>').find((f) => f.includes('CLINICA-AVISO'));
-    assert.match(filaAviso, /historial \(\d+\)/, 'hay desplegable de historial');
-    const items = [...filaAviso.matchAll(/<li>[^<]*· (\w+)<\/li>/g)].map((m) => m[1]);
-    // la más reciente primero: conectado (la última), degradado, conectado (la primera)
-    assert.deepEqual(items.slice(0, 3), ['conectado', 'degradado', 'conectado'], 'orden: más reciente primero');
+    assert.match(filaAviso, /data-historial/, 'hay enlace de historial');
+    assert.match(filaAviso, /Historial \(\d+\)/, 'muestra el conteo de transiciones');
+    // verificar endpoint API de historial
+    const respHistorial = await r.pedir('/api/historial/' + ID2);
+    assert.equal(respHistorial.status, 200, 'endpoint historial devuelve 200');
+    const datosHistorial = await respHistorial.json();
+    assert.ok(datosHistorial.cambios && datosHistorial.cambios.length >= 3, 'tiene al menos 3 cambios');
+    const estadosReversos = datosHistorial.cambios.slice().reverse().map((x) => x.estado);
+    assert.deepEqual(estadosReversos.slice(0, 3), ['conectado', 'degradado', 'conectado'], 'orden: más reciente primero');
+    // endpoint para clínica inexistente
+    assert.equal((await r.pedir('/api/historial/a1b2c3d4-0000-4000-8000-0000000000ff')).status, 404, 'clínica inexistente devuelve 404');
     const filaOk = pagina.split('<tr>').find((f) => f.includes('CLINICA-OK'));
     const idCerrada = 'a1b2c3d4-0000-4000-8000-00000000000b';
     await r.latido(base(idCerrada, { host: 'CLINICA-SIN-CAMBIOS', estado: 'conectado' }));
     const filaSinCambios = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-SIN-CAMBIOS'));
-    assert.ok(filaSinCambios.includes('historial (1)'), 'el primer estado cuenta como una transición');
+    assert.ok(filaSinCambios.includes('Historial (1)'), 'el primer estado cuenta como una transición');
     assert.ok(filaOk && typeof filaOk === 'string', 'la fila OK existe');
-    ok('historial: cada instalación muestra sus últimas transiciones en un desplegable');
+    ok('historial: cada instalación muestra enlace al historial y el endpoint API devuelve los cambios en orden');
 
     // --- olvidar una instalación
     assert.equal((await r.pedir('/clinicas/' + ID4, { method: 'DELETE', headers: { Origin: 'https://otra-web.example' } })).status, 403);
@@ -190,7 +205,7 @@ const dirsTemporales = [];
     ok('el estado de las clínicas sobrevive a reiniciar el receptor');
   } finally { await r.parar(); }
 
-  // --- disponibilidad por día: datos conocidos precargados (porcentajes, colores y detalle exactos)
+  // --- estado predominante por día: datos conocidos precargados (colores y detalle)
   const dirDisp = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-disp-'));
   dirsTemporales.push(dirDisp);
   fs.mkdirSync(path.join(dirDisp, 'estado'), { recursive: true });
@@ -199,24 +214,39 @@ const dirsTemporales = [];
   fs.writeFileSync(path.join(dirDisp, 'estado', 'clinicas.json'), JSON.stringify({
     [ID1]: { id: ID1, alias: null, host: 'CLINICA-DISP', estado: 'apagada', ultimo: Date.now(), cambios: [],
       dias: {
-        [diaHace(3)]: { ok: 24 * H },                                                    // 100 %  -> verde
-        [diaHace(2)]: { ok: 22 * H, warning: 2 * H },                                    // 91,7 % -> ámbar
-        [diaHace(1)]: { ok: 12 * H, offline: 12 * H },                                   // 50 %   -> rojo
+        [diaHace(3)]: { ok: 24 * H },                                                    // predominante ok -> verde
+        [diaHace(2)]: { ok: 22 * H, warning: 2 * H },                                    // predominante ok -> verde
+        [diaHace(1)]: { ok: 12 * H, offline: 12 * H },                                   // predominante ok (empate, ok primero) -> verde
+        [diaHace(4)]: { warning: 16 * H, ok: 8 * H },                                    // predominante warning -> ámbar
+        [diaHace(6)]: { desconectado: 18 * H, ok: 6 * H },                               // predominante desconectado -> rojo
+        [diaHace(8)]: { offline: 20 * H, ok: 4 * H },                                    // predominante offline -> rojo
         [diaHace(5)]: { apagada: 24 * H }                                                // solo apagada -> sin datos
       } }
   }));
   r = await arrancar({ dir: dirDisp, env: { OFFLINE_MIN: '60' } });
   try {
     const pag = await r.html('/clinicas?parcial=1');
-    const cas = (n) => new RegExp(`<span class="dia ([\\w-]+)" title="${diaHace(n)}: ([^"]*)"`).exec(pag);
-    assert.equal(cas(3)[1], 'd-ok'); assert.match(cas(3)[2], /100,0 % disponible/);
-    assert.equal(cas(2)[1], 'd-aviso'); assert.match(cas(2)[2], /91,7 % disponible.*con problemas 2 h 0 min/);
-    assert.equal(cas(1)[1], 'd-mal'); assert.match(cas(1)[2], /50,0 % disponible.*sin señal 12 h 0 min/);
-    assert.equal(cas(5)[1], 'sd', 'un día solo apagada no cuenta como indisponible'); assert.match(cas(5)[2], /sin datos/);
-    assert.equal(cas(7)[1], 'sd'); // un día sin ningún dato
+    const cas = (n) => new RegExp(`<span class="dia-celda" title="${diaHace(n)}: ([^"]*)"><span class="dia ([\\w-]+)"`).exec(pag);
+    // Grupo 1 = título (detalle), Grupo 2 = clase de color
+    // Día 3: 100% ok -> verde, conectada
+    assert.equal(cas(3)[2], 'd-ok'); assert.match(cas(3)[1], /conectada/);
+    // Día 2: ok predominante (22h vs 2h warning) -> verde
+    assert.equal(cas(2)[2], 'd-ok'); assert.match(cas(2)[1], /conectada.*22 h/); assert.match(cas(2)[1], /con problemas 2 h/);
+    // Día 1: ok y offline empatan (12h cada uno), ok gana por orden -> verde
+    assert.equal(cas(1)[2], 'd-ok'); assert.match(cas(1)[1], /conectada.*12 h/); assert.match(cas(1)[1], /sin señal 12 h/);
+    // Día 4: warning predominante -> ámbar
+    assert.equal(cas(4)[2], 'd-aviso'); assert.match(cas(4)[1], /con problemas.*16 h/);
+    // Día 6: desconectado predominante -> rojo
+    assert.equal(cas(6)[2], 'd-mal'); assert.match(cas(6)[1], /desconectada.*18 h/);
+    // Día 8: offline predominante -> rojo
+    assert.equal(cas(8)[2], 'd-mal'); assert.match(cas(8)[1], /sin señal.*20 h/);
+    // Día 5: solo apagada -> sin datos
+    assert.equal(cas(5)[2], 'sd', 'un día solo apagada no cuenta'); assert.match(cas(5)[1], /sin datos/);
+    // Día 7: sin datos -> gris
+    assert.equal(cas(7)[2], 'sd');
     assert.match(pag, /Últimos 14 días/);
-    assert.match(pag, /\d+,\d % en 14 días/, 'resumen de 14 días');
-    ok('disponibilidad: porcentaje, color (verde ≥99 %, ámbar ≥90 %, rojo) y detalle por día; apagada no cuenta como caída');
+    assert.match(pag, /\d+ de \d+ días conectada/, 'resumen de 14 días');
+    ok('estado predominante: color por estado mayoritario y detalle por día; apagada no cuenta como caída');
   } finally { await r.parar(); }
 
   // --- disponibilidad por día: acumulación real con latidos y un hueco sin señal
@@ -264,6 +294,82 @@ const dirsTemporales = [];
     assert.equal(ultimo, 429);
     assert.equal((await r.latido(base(ID2))).status, 200, 'otra instalación no se ve afectada');
     ok('límite de 40 latidos/hora por instalación; las demás no se ven afectadas');
+  } finally { await r.parar(); }
+
+  // --- riesgo automático: bajo para clínica conectada
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-BAJA', estado: 'conectado' }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo bajo/, 'clínica conectada → riesgo bajo');
+    await r.latido(base(ID2, { host: 'CLINICA-MEDIA', estado: 'degradado', causa: 'x' }));
+    pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo medio/, 'clínica degradada → riesgo medio');
+    // orden: riesgo alto primero, luego medio, luego bajo
+    const filaMedia = pagina.split('<tr>').find((f) => f.includes('CLINICA-MEDIA'));
+    const filaBaja = pagina.split('<tr>').find((f) => f.includes('CLINICA-BAJA'));
+    assert.ok(filaMedia && filaBaja && pagina.indexOf('CLINICA-MEDIA') < pagina.indexOf('CLINICA-BAJA'), 'riesgo medio antes que bajo');
+    ok('riesgo automático: bajo para conectada, medio para degradada, ordenado por riesgo');
+  } finally { await r.parar(); }
+
+  // --- riesgo alto: en nube
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-NUBE', estado: 'conectado', enNube: true }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo alto/, 'en nube → riesgo alto');
+    assert.match(pagina, /sincronizado en la nube/, 'alerta de nube');
+    ok('riesgo alto por estar en la nube con alerta proactiva');
+  } finally { await r.parar(); }
+
+  // --- riesgo alto: sin señal
+  r = await arrancar({ env: { OFFLINE_MIN: '0.03' } }); // 1.8 s
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-SIN-Senal', estado: 'conectado' }));
+    await pausa(2300);
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo alto/, 'sin señal → riesgo alto');
+    ok('riesgo alto por sin señal');
+  } finally { await r.parar(); }
+
+  // --- datos técnicos en la tabla
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-TECNICA', estado: 'conectado', cpu: 45, memMB: 512, citas: 23 }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    const fila = pagina.split('<tr>').find((f) => f.includes('CLINICA-TECNICA'));
+    assert.ok(fila && fila.includes('CPU 45%'), 'CPU en la tabla');
+    assert.ok(fila && fila.includes('RAM 512 MB'), 'RAM en la tabla');
+    assert.ok(fila && fila.includes('23 citas'), 'citas en la tabla');
+    ok('datos técnicos (CPU, RAM, citas) visibles en la tabla');
+  } finally { await r.parar(); }
+
+  // --- resumen de riesgo en la página
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-A', estado: 'conectado' }));
+    await r.latido(base(ID2, { host: 'CLINICA-B', estado: 'conectado' }));
+    await r.latido(base(ID3, { host: 'CLINICA-C', estado: 'degradado', causa: 'x' }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /2 riesgo bajo/, 'resumen: 2 bajo');
+    assert.match(pagina, /1 riesgo medio/, 'resumen: 1 medio');
+    ok('resumen de riesgo en la página');
+  } finally { await r.parar(); }
+
+  // --- alerta: memoria alta
+  r = await arrancar({ env: { OFFLINE_MIN: '60' } });
+  dirsTemporales.push(r.dir);
+  try {
+    await r.latido(base(ID1, { host: 'CLINICA-MEM', estado: 'conectado', memMB: 3000 }));
+    let pagina = await r.html('/clinicas?parcial=1');
+    assert.match(pagina, /riesgo alto/, 'memoria alta → riesgo alto');
+    assert.match(pagina, /más de 2 GB de RAM/, 'alerta de memoria');
+    ok('alerta proactiva por memoria alta');
   } finally { await r.parar(); }
 
   for (const d of dirsTemporales) fs.rmSync(d, { recursive: true, force: true });

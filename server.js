@@ -11,16 +11,9 @@ const CITAS_PATH = path.join(DATA_DIR, 'citas.json');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const LOG_PATH = path.join(DATA_DIR, 'app.log');
 const LOG_MAX_BYTES = 512 * 1024; // se recorta a la mitad al superarlo
-// Motor de WhatsApp (motores/*.js). Se elige con "motor" en data/config.json o desde la
-// pagina (/api/motor). Cada motor tiene su propia sesion: al cambiar hay que vincular.
-const MOTORES = { wwebjs: './motores/wwebjs', baileys: './motores/baileys' };
-const NOMBRES_MOTOR = { wwebjs: 'whatsapp-web.js (recomendado)', baileys: 'Baileys (experimental)' };
-// whatsapp-web.js para todas. Baileys es experimental: con el algunos moviles no llegan a descifrar
-// los mensajes y se quedan en «Esperando el mensaje…» (fallo abierto en Baileys, octubre 2026), asi
-// que solo se usa si alguien lo elige a mano en el selector (motorElegido).
+// Motor de WhatsApp (motores/*.js). Usa whatsapp-web.js.
 const MOTOR_POR_DEFECTO = 'wwebjs';
-const motorDe = (datos) => (datos.motor === 'baileys' && datos.motorElegido !== true ? MOTOR_POR_DEFECTO
-  : Object.hasOwn(MOTORES, datos.motor) ? datos.motor : MOTOR_POR_DEFECTO);
+const MOTOR_PATH = './motores/wwebjs';
 const MENSAJE_POR_DEFECTO = 'Hola {nombre}, te recordamos tu cita de {especialidad} el día {fecha} a las {hora}. Si no puedes asistir, avísame. ¡Gracias!';
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -95,7 +88,15 @@ function guardarCitas(citas) {
 }
 
 function leerConfig() {
-  const configBase = { mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: MOTOR_POR_DEFECTO, motorElegido: false, latido: true };
+  const configBase = {
+    mensaje: MENSAJE_POR_DEFECTO, autoEnvio: false, motor: MOTOR_POR_DEFECTO, motorElegido: false, latido: true,
+    // Branding personalizable (v3)
+    clinica: { nombre: '', logo: '', colorPrimario: '' },
+    // Mensajes por especialidad (v3)
+    mensajes: null,
+    // Onboarding completado (v3)
+    onboardingCompletado: false
+  };
   if (!fs.existsSync(CONFIG_PATH)) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(configBase, null, 2), 'utf8');
     return configBase;
@@ -103,12 +104,28 @@ function leerConfig() {
 
   try {
     const datos = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    // clinica: objeto con nombre, logo, colorPrimario
+    const clinica = typeof datos.clinica === 'object' && datos.clinica != null
+      ? {
+          nombre: typeof datos.clinica.nombre === 'string' ? datos.clinica.nombre : '',
+          logo: typeof datos.clinica.logo === 'string' ? datos.clinica.logo : '',
+          colorPrimario: typeof datos.clinica.colorPrimario === 'string' ? datos.clinica.colorPrimario : ''
+        }
+      : { nombre: '', logo: '', colorPrimario: '' };
+    // mensajes: objeto con plantillas por especialidad, o null para usar mensaje global
+    const mensajes = datos.mensajes != null && typeof datos.mensajes === 'object' && !Array.isArray(datos.mensajes)
+      ? datos.mensajes : null;
+    // onboardingCompletado: booleano
+    // Si no existe el campo (clínica existente que actualiza a v3), se considera completado
+    // para no mostrar el wizard a clínicas que ya están en producción.
+    const onboardingCompletado = datos.onboardingCompletado === false ? false : true;
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
-      autoEnvio: datos.autoEnvio === true,
-      motor: motorDe(datos),
+      autoEnvio: false, // v3: envío siempre manual, nunca automático
+      motor: MOTOR_POR_DEFECTO,
       motorElegido: datos.motorElegido === true,
-      latido: datos.latido !== false // avisar a soporte del estado: activado salvo que se desactive
+      latido: datos.latido !== false,
+      clinica, mensajes, onboardingCompletado
     };
   } catch (_) {
     return configBase;
@@ -119,10 +136,24 @@ function guardarConfig(config) {
   const actual = leerConfig();
   const mensaje = typeof config?.mensaje === 'string' && config.mensaje.trim() ? config.mensaje : actual.mensaje;
   const autoEnvio = typeof config?.autoEnvio === 'boolean' ? config.autoEnvio : actual.autoEnvio;
-  const motor = Object.hasOwn(MOTORES, config?.motor) ? config.motor : actual.motor;
+  const motor = actual.motor; // v3: solo un motor, no se cambia
   const motorElegido = typeof config?.motorElegido === 'boolean' ? config.motorElegido : actual.motorElegido;
   const latido = typeof config?.latido === 'boolean' ? config.latido : actual.latido;
-  const nuevo = { ...actual, mensaje, autoEnvio, motor, motorElegido, latido };
+  // Branding (v3)
+  const clinica = typeof config?.clinica === 'object' && config.clinica != null
+    ? {
+        nombre: typeof config.clinica.nombre === 'string' ? config.clinica.nombre : '',
+        logo: typeof config.clinica.logo === 'string' ? config.clinica.logo : '',
+        colorPrimario: typeof config.clinica.colorPrimario === 'string' ? config.clinica.colorPrimario : ''
+      }
+    : actual.clinica;
+  // Mensajes por especialidad (v3)
+  const mensajes = config?.mensajes != null && typeof config.mensajes === 'object' && !Array.isArray(config.mensajes)
+    ? config.mensajes : actual.mensajes;
+  // Onboarding (v3)
+  const onboardingCompletado = typeof config?.onboardingCompletado === 'boolean' ? config.onboardingCompletado : actual.onboardingCompletado;
+  // autoEnvio forzado a false en v3: envío siempre manual
+  const nuevo = { ...actual, mensaje, autoEnvio: false, motor, motorElegido, latido, clinica, mensajes, onboardingCompletado };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nuevo, null, 2), 'utf8');
   return nuevo;
 }
@@ -192,7 +223,20 @@ function normalizarHoraA24(horaStr) {
   return limpia;
 }
 
-function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
+// Selecciona la plantilla: si hay mensajes por especialidad (v3), busca coincidencia; si no, usa el global
+function plantillaParaCita(cita, config) {
+  const especialidad = limpiarString(cita.especialidad);
+  if (config.mensajes && especialidad && typeof config.mensajes[especialidad] === 'string') {
+    return config.mensajes[especialidad];
+  }
+  // Si hay mensajes por especialidad con "default" como fallback
+  if (config.mensajes && typeof config.mensajes.default === 'string') {
+    return config.mensajes.default;
+  }
+  return config.mensaje;
+}
+
+function formatearMensaje(cita, plantilla = plantillaParaCita(cita, leerConfig())) {
   const valores = {
     nombre: limpiarString(cita.nombre),
     telefono: limpiarString(cita.telefono),
@@ -206,8 +250,6 @@ function formatearMensaje(cita, plantilla = leerConfig().mensaje) {
 
 // ---------- Cliente WhatsApp (lo propio de cada libreria vive en motores/) ----------
 let Motor = null; // se carga al arrancar, tras comprobar que no faltan ficheros (ver arrancar())
-// motores con su sesion: para el selector de la pagina y el aviso de revincular
-const listaMotores = () => Object.keys(MOTORES).map((id) => ({ id, nombre: NOMBRES_MOTOR[id], vinculado: require(MOTORES[id]).sesionGuardada() }));
 // log del motor: ui=true tambien lo muestra en la pagina
 const logMotor = (tipo, texto, ui = false) => (ui ? emitir('log', { tipo, texto }) : registrarLog(tipo, texto));
 
@@ -603,84 +645,9 @@ async function enviarRecordatorios(citas) {
   return { enviados, fallidos, omitidos, sinRespuesta, total: lista.length };
 }
 
-// ---------- Envío automático (24 h antes de la cita) ----------
-const HORAS_ANTELACION = 24;
-const INTERVALO_AUTO_MS = Number(process.env.INTERVALO_AUTO_MS) || 45 * 1000; // variable: solo para pruebas
-const PAUSA_AUTO_SIN_RESPUESTA_MS = 5 * 60 * 1000;
-let autoPausadoHasta = 0;
-
-function fechaHoraCita(cita) {
-  const fLimpia = limpiarString(cita.fecha);
-  const hLimpia = normalizarHoraA24(cita.hora);
-  if (!fLimpia || !hLimpia) return null;
-
-  let anio, mes, dia;
-
-  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fLimpia);
-  if (m) {
-    anio = Number(m[1]);
-    mes = Number(m[2]) - 1;
-    dia = Number(m[3]);
-  } else {
-    m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(fLimpia);
-    if (m) {
-      anio = Number(m[3]);
-      mes = Number(m[2]) - 1;
-      dia = Number(m[1]);
-    } else {
-      return null;
-    }
-  }
-
-  const hMatch = /^(\d{2}):(\d{2})$/.exec(hLimpia);
-  if (!hMatch) return null;
-
-  const d = new Date(anio, mes, dia, Number(hMatch[1]), Number(hMatch[2]));
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-let autoEnvioEnCurso = false;
-async function cicloAutoEnvio() {
-  if (autoEnvioEnCurso || !clientReady || Date.now() < autoPausadoHasta) return;
-  const config = leerConfig();
-  if (!config.autoEnvio) return;
-
-  const ahora = Date.now();
-  const limite = ahora + HORAS_ANTELACION * 3600 * 1000;
-  const pendientes = leerCitas().filter((c) => {
-    // estadoEnvio: ya intentado (enviado/fallido/omitido); recordatorioEnviado: compatibilidad con ficheros antiguos
-    if (c.estadoEnvio || c.recordatorioEnviado || !c.telefono) return false;
-    const dt = fechaHoraCita(c);
-    return dt && dt.getTime() > ahora && dt.getTime() <= limite;
-  });
-  if (pendientes.length === 0) return;
-
-  autoEnvioEnCurso = true;
-  try {
-    emitir('log', { tipo: 'info', texto: `Envío automático: ${pendientes.length} cita(s) a menos de ${HORAS_ANTELACION} h.` });
-    for (let i = 0; i < pendientes.length; i++) {
-      if (!clientReady) break;
-      if (i > 0) await pausa(2500 + Math.random() * 2500);
-      const resultado = await enviarUna(pendientes[i], config.mensaje);
-      contarEnvio(resultado);
-      if (resultado === 'sin_respuesta') {
-        // no es culpa de la cita: sin marcar, y se espera antes de volver a intentarlo
-        autoPausadoHasta = Date.now() + PAUSA_AUTO_SIN_RESPUESTA_MS;
-        emitir('log', { tipo: 'aviso', texto: `Envío automático en pausa ${PAUSA_AUTO_SIN_RESPUESTA_MS / 60000} min: WhatsApp no responde. Las citas pendientes se reintentarán.` });
-        break;
-      }
-      // se marca también si falló, para no reintentar cada minuto y saturar
-      marcarEstadoEnvio([pendientes[i]], resultado);
-    }
-  } finally {
-    autoEnvioEnCurso = false;
-  }
-}
-setInterval(cicloAutoEnvio, INTERVALO_AUTO_MS);
-
 // ---------- Servidor HTTP ----------
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'renderer')));
 
 // Librerías para importar PDF/imagen, servidas en local (sin depender de internet)
@@ -719,31 +686,97 @@ app.get('/api/config', (_req, res) => res.json(leerConfig()));
 
 app.post('/api/config', (req, res) => res.json(guardarConfig(req.body || {})));
 
-app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores(), salud: datosSalud() }));
-
-// Cambio de motor desde la pagina: corta la conexion actual (cada motor tiene su sesion)
-// y, si el nuevo ya esta vinculado, conecta con el.
-app.post('/api/motor', (req, res) => {
-  const id = String((req.body || {}).motor || '');
-  if (!Object.hasOwn(MOTORES, id)) return res.status(400).json({ error: 'Motor desconocido' });
-  if (client) {
-    pararTemporizadorConexion();
-    client.descartar();
-    client = null;
-  }
-  conectando = false;
-  clientReady = false;
-  terminarSalud('cambio de motor');
-  Motor = require(MOTORES[id]);
-  guardarConfig({ motor: id, motorElegido: true }); // elegido a mano: se respeta (incluido Baileys)
-  emitir('estado', 'desconectado');
-  emitir('log', { tipo: 'info', texto: `Motor cambiado a ${NOMBRES_MOTOR[id]}.` + (Motor.sesionGuardada() ? ' Conectando con su sesión guardada...' : ' Pulsa «Conectar WhatsApp» y vincula el móvil.') });
-  if (Motor.sesionGuardada()) {
-    ultimoIntentoConexion = 0; // cambio explicito: sin esperar el cooldown
-    iniciarSesion();
-  }
-  res.json({ motor: id, motores: listaMotores() });
+// Estado del onboarding (v3): devuelve si se ha completado y datos útiles para el wizard
+app.get('/api/onboarding', (_req, res) => {
+  const config = leerConfig();
+  const citas = leerCitas();
+  res.json({
+    completado: config.onboardingCompletado,
+    clinicaNombre: config.clinica?.nombre || '',
+    tieneCitas: citas.length > 0
+  });
 });
+
+// Resetear onboarding (v3): permite repetir el wizard de configuración inicial
+app.post('/api/reset-onboarding', (_req, res) => {
+  const config = leerConfig();
+  guardarConfig({ ...config, onboardingCompletado: false });
+  res.json({ ok: true, onboardingCompletado: false });
+});
+
+// Exportar citas a CSV (v3)
+app.get('/api/exportar-csv', (_req, res) => {
+  const citas = leerCitas();
+  const encabezados = ['nombre', 'telefono', 'fecha', 'hora', 'especialidad', 'estadoEnvio'];
+  const filas = citas.map((c) =>
+    encabezados.map((h) => {
+      const val = String(c[h] ?? '');
+      // Escapar comillas y envolver en comillas si contiene comas o saltos
+      return val.includes(',') || val.includes('"') || val.includes('\n')
+        ? '"' + val.replace(/"/g, '""') + '"'
+        : val;
+    }).join(',')
+  );
+  const csv = [encabezados.join(','), ...filas].join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="citas.csv"');
+  res.send('\uFEFF' + csv); // BOM para Excel
+});
+
+// Servir logo de la clínica (v3)
+app.get('/api/logo', (req, res) => {
+  const config = leerConfig();
+  if (!config.clinica.logo) return res.status(404).json({ error: 'Sin logo configurado' });
+  const logoPath = path.join(__dirname, config.clinica.logo);
+  if (!fs.existsSync(logoPath)) return res.status(404).json({ error: 'Logo no encontrado' });
+  // Seguridad: el archivo debe estar dentro del directorio de la app
+  const resuelto = path.resolve(logoPath);
+  if (!resuelto.startsWith(__dirname)) return res.status(403).json({ error: 'Ruta no permitida' });
+  res.sendFile(resuelto);
+});
+
+// Subir logo desde el navegador (v3): recibe base64 y lo guarda en data/
+app.post('/api/upload-logo', (req, res) => {
+  const { dataUrl } = req.body || {};
+  if (!dataUrl || typeof dataUrl !== 'string') {
+    return res.status(400).json({ error: 'Se requiere dataUrl' });
+  }
+  // Validar que es una data URL de imagen
+  const match = dataUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+  if (!match) {
+    return res.status(400).json({ error: 'Formato no válido, debe ser una imagen' });
+  }
+  const ext = match[1]; // png, jpeg, gif, webp, etc.
+  const base64Data = match[2];
+  const buffer = Buffer.from(base64Data, 'base64');
+  // Limitar a 5 MB
+  if (buffer.length > 5 * 1024 * 1024) {
+    return res.status(400).json({ error: 'La imagen es demasiado grande (máx 5 MB)' });
+  }
+  const filename = `logo.${ext}`;
+  const logoPath = path.join(DATA_DIR, filename);
+  const relativePath = path.relative(__dirname, logoPath);
+  fs.writeFileSync(logoPath, buffer);
+  // Actualizar config con la ruta relativa
+  const config = leerConfig();
+  guardarConfig({ ...config, clinica: { ...config.clinica, logo: relativePath } });
+  res.json({ ok: true, path: relativePath });
+});
+
+// Eliminar logo (v3)
+app.post('/api/remove-logo', (_req, res) => {
+  const config = leerConfig();
+  if (config.clinica.logo) {
+    const logoPath = path.join(__dirname, config.clinica.logo);
+    try {
+      if (fs.existsSync(logoPath)) fs.unlinkSync(logoPath);
+    } catch (_) { /* ignorar si no se puede borrar */ }
+  }
+  guardarConfig({ ...config, clinica: { ...config.clinica, logo: '' } });
+  res.json({ ok: true });
+});
+
+app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, salud: datosSalud() }));
 
 // El log lleva nombres y telefonos de pacientes: se quitan antes de sacarlo del equipo.
 function anonimizar(linea) {
@@ -774,6 +807,33 @@ const INSTALACION_PATH = path.join(DATA_DIR, 'instalacion.json');
 let idCache = null;
 let latidoFalla = false;
 let latidoTimer = null;
+// CPU del proceso: se mide cada latido comparando con el valor anterior
+let cpuUsageAnterior = process.cpuUsage();
+let cpuTiempoAnterior = process.hrtime.bigint();
+
+// Uso de CPU del proceso en porcentaje (0-100)
+function cpuDelProceso() {
+  const ahora = process.hrtime.bigint();
+  const cpu = process.cpuUsage();
+  const deltaCpu = Number((cpu.user - cpuUsageAnterior.user) + (cpu.system - cpuUsageAnterior.system));
+  const deltaTiempo = Number(ahora - cpuTiempoAnterior) / 1e9; // segundos
+  cpuUsageAnterior = cpu;
+  cpuTiempoAnterior = ahora;
+  if (deltaTiempo <= 0) return 0;
+  // porcentaje sobre todos los núcleos
+  const nucleos = require('os').cpus().length;
+  return Math.min(100, Math.round(deltaCpu / deltaTiempo / 1e6 * 100 / nucleos));
+}
+
+// Memoria del proceso en MB (RSS)
+function memoriaProcesoMB() {
+  return Math.round(process.memoryUsage().rss / 1048576);
+}
+
+// ¿La app está en un directorio sincronizado en la nube? (riesgo de corrupción)
+function estaEnNube() {
+  return /onedrive|dropbox|google ?drive|icloud/i.test(__dirname);
+}
 
 function idInstalacion() {
   if (idCache) return idCache;
@@ -816,7 +876,9 @@ async function enviarLatidoAhora(estado) {
         id: idInstalacion(), host: require('os').hostname(), version: updater.versionEnEjecucion(), canal: updater.canal(),
         motor: Motor && Motor.nombre, estado: estado || estadoActual(), causa: salud.causa,
         ultimoError: ultimoError ? anonimizar(ultimoError).slice(0, 200) : null, ultimoOk: salud.ultimoOk,
-        arranqueHaceSeg: Math.round(process.uptime())
+        arranqueHaceSeg: Math.round(process.uptime()),
+        // Datos técnicos para evaluación de riesgos
+        cpu: cpuDelProceso(), memMB: memoriaProcesoMB(), citas: leerCitas().length, enNube: estaEnNube()
       })
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -888,14 +950,26 @@ async function informeDiagnostico() {
   let omitidas = 0;
   while (log.length > 80 && Buffer.byteLength(log.join('\n')) > 200 * 1024) { log.shift(); omitidas++; }
   if (omitidas) log.unshift(`[${omitidas} líneas más antiguas de esta ejecución omitidas por tamaño]`);
+  // Archivos en data/ para detectar corrupción o archivos inesperados
+  let archivosData = [];
+  try {
+    archivosData = fs.readdirSync(DATA_DIR).map((n) => {
+      const stat = fs.statSync(path.join(DATA_DIR, n));
+      return { nombre: n, tamano: stat.size, esDirectorio: stat.isDirectory() };
+    }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  } catch (_) { /* sin data/ */ }
+  const enNube = estaEnNube();
   return {
     version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), canal: updater.canal(), fijada: updater.versionFijada(), estado: estadoActual(), ultimoError: ultimoError && anonimizar(ultimoError),
     node: process.version, so: `${os.type()} ${os.release()} ${os.arch()}`, host: os.hostname(),
     arranqueHaceSeg: Math.round(process.uptime()), ramLibreMB: Math.round(os.freemem() / 1048576),
+    // Datos técnicos del proceso
+    cpu: cpuDelProceso(), memMB: memoriaProcesoMB(),
     citas: leerCitas().length, motor: Motor.nombre, salud: saludParaInforme(), envios, lineasDesdeArranque,
     latido: { activo: Boolean(LATIDO_URL) && leerConfig().latido, id: idInstalacion(), fallando: latidoFalla },
     ...delMotor, chromiumRuta: sinUsuario(delMotor.chromiumRuta),
-    redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube: /onedrive|dropbox|google ?drive|icloud/i.test(__dirname), discoLibreMB,
+    redWhatsApp: red, proxy, rutaApp: sinUsuario(__dirname), enNube, discoLibreMB,
+    archivosData,
     log: log.map(anonimizar)
   };
 }
@@ -925,20 +999,6 @@ app.post('/api/enviar-diagnostico', async (_req, res) => {
 
 app.post('/api/conectar', (_req, res) => { iniciarSesion(); res.json({ ok: true }); });
 
-// Vincular sin cámara (solo motores que lo admiten, p. ej. Baileys): con «Conectar»
-// ya pulsado, devuelve el código que se introduce en el móvil.
-app.post('/api/vincular-codigo', async (req, res) => {
-  if (!client || typeof client.pedirCodigo !== 'function') return res.status(400).json({ error: 'Pulsa antes «Conectar WhatsApp» (o este motor no admite código).' });
-  const numero = normalizarTelefono((req.body || {}).telefono || '');
-  if (numero.length < 10) return res.status(400).json({ error: 'Escribe el número del móvil que vas a vincular' });
-  try {
-    const codigo = await client.pedirCodigo(numero);
-    emitir('log', { tipo: 'info', texto: 'Código de vinculación generado. Introdúcelo en el móvil: WhatsApp → Dispositivos vinculados → Vincular con el número de teléfono.' });
-    res.json({ codigo });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
 
 // Cierre controlado desde la página (el mismo que Ctrl+C). Solo desde la propia
 // página: cualquier web abierta en el PC podría mandar este POST a localhost.
@@ -1081,16 +1141,9 @@ async function arrancar() {
   } catch (err) {
     registrarLog('error', `Faltan ficheros de la aplicación y no se pudieron descargar (${err.message}). Conecta a internet y vuelve a abrirla.`);
   }
-  // Entre 2.2.0 y 2.4.0 Baileys era el motor por defecto de las instalaciones nuevas y quedaba guardado sin
-  // que nadie lo eligiera: se pasan a whatsapp-web.js una sola vez y se deja anotado.
-  try {
-    const crudo = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    if (crudo.motor === 'baileys' && crudo.motorElegido !== true) {
-      guardarConfig({ motor: MOTOR_POR_DEFECTO, motorElegido: false });
-      registrarLog('aviso', 'Se usa whatsapp-web.js en lugar de Baileys (experimental: algunos móviles no reciben los mensajes). Si no está vinculado, pulsa «Conectar WhatsApp» y vincula el móvil.');
-    }
-  } catch (_) { /* sin config.json: valores por defecto */ }
-  Motor = require(MOTORES[leerConfig().motor]);
+  // Asegurar que config.json existe antes de arrancar el servidor
+  leerConfig();
+  Motor = require(MOTOR_PATH);
 
   server = app.listen(PORT, () => {
     console.log('==================================================');
@@ -1104,9 +1157,7 @@ async function arrancar() {
       registrarLog('info', 'Sesión de WhatsApp encontrada, reconectando automáticamente...');
       iniciarSesion();
     } else {
-      // motor sin sesión pero con otro vinculado: la sesión de un motor no sirve para el otro
-      const otro = listaMotores().find((m) => m.vinculado);
-      if (otro) emitir('log', { tipo: 'aviso', texto: `Esta versión usa ${NOMBRES_MOTOR[Motor.nombre]}: hay que vincular el móvil una vez más (pulsa «Conectar WhatsApp»).` + (otro.id === 'baileys' ? '' : ` Para seguir con el motor anterior, elige «${otro.nombre}» en «Motor».`) });
+      emitir('log', { tipo: 'aviso', texto: 'No hay sesión de WhatsApp guardada. Pulsa «Conectar WhatsApp» y vincula el móvil.' });
     }
   });
 
