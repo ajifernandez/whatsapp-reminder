@@ -654,7 +654,7 @@ async function enviarRecordatorios(citas) {
 
 // ---------- Servidor HTTP ----------
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'renderer')));
 
 // Librerías para importar PDF/imagen, servidas en local (sin depender de internet)
