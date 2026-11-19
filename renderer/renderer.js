@@ -22,6 +22,8 @@ const api = {
   exportarCsv: () => fetch('/api/exportar-csv'),
   onboarding: () => fetch('/api/onboarding').then((r) => r.json()),
   resetOnboarding: () => fetch('/api/reset-onboarding', { method: 'POST' }).then((r) => r.json()),
+  uploadLogo: (dataUrl) => fetch('/api/upload-logo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl }) }).then((r) => r.json()),
+  removeLogo: () => fetch('/api/remove-logo', { method: 'POST' }).then((r) => r.json()),
   conectar: () => fetch('/api/conectar', { method: 'POST' }),
   cerrarSesion: () => fetch('/api/cerrar', { method: 'POST' }),
   cambiarMotor: (motor) => fetch('/api/motor', {
@@ -922,6 +924,8 @@ function aplicarBranding(config) {
     $('logoImagen').classList.remove('oculto');
     $('logoIcono').classList.add('oculto');
   }
+  // Actualizar preview en config avanzada
+  actualizarLogoPreview(clinica.logo);
 }
 
 // ---------- Configuración avanzada UI (v3) ----------
@@ -930,7 +934,7 @@ function cargarConfigAvanzada(config) {
   if (config.clinica) {
     $('clinicaNombre').value = config.clinica.nombre || '';
     $('clinicaColor').value = config.clinica.colorPrimario || '#25D366';
-    $('clinicaLogo').value = config.clinica.logo || '';
+    actualizarLogoPreview(config.clinica.logo);
   }
 
   // Mensajes por especialidad
@@ -958,7 +962,7 @@ function agregarMensajeFila(contenedor, especialidad = '', mensaje = '') {
 function recopilarConfigAvanzada() {
   const clinica = {
     nombre: $('clinicaNombre').value.trim(),
-    logo: $('clinicaLogo').value.trim(),
+    logo: config.clinica.logo || '',
     colorPrimario: $('clinicaColor').value
   };
 
@@ -978,8 +982,69 @@ function recopilarConfigAvanzada() {
 // ---------- Event listeners v3 ----------
 $('btnAnadirMensajeEsp').addEventListener('click', () => agregarMensajeFila($('mensajesEspecialidadLista')));
 
-$('btnLimpiarLogo').addEventListener('click', () => {
-  $('clinicaLogo').value = '';
+// ---------- Selector de logo (v3) ----------
+
+function actualizarLogoPreview(logoPath) {
+  const previewCaja = $('logoPreviewCaja');
+  const fileName = $('logoFileName');
+  if (logoPath) {
+    $('logoPreviewImg').src = '/api/logo?' + Date.now();
+    previewCaja.classList.remove('oculto');
+    fileName.textContent = logoPath.split('/').pop() || logoPath;
+  } else {
+    previewCaja.classList.add('oculto');
+    fileName.textContent = '';
+  }
+}
+
+$('btnSeleccionarLogo').addEventListener('click', () => {
+  $('inputLogoFile').click();
+});
+
+$('inputLogoFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  // Validar tipo
+  if (!file.type.startsWith('image/')) {
+    toast('Selecciona un archivo de imagen.', 'error');
+    return;
+  }
+  // Validar tamaño (5 MB)
+  if (file.size > 5 * 1024 * 1024) {
+    toast('La imagen es demasiado grande (máx 5 MB).', 'error');
+    return;
+  }
+  // Convertir a base64
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const result = await api.uploadLogo(reader.result);
+      if (result.ok) {
+        config.clinica.logo = result.path;
+        aplicarBranding(config);
+        actualizarLogoPreview(result.path);
+        toast('Logo subido correctamente.', 'ok');
+      }
+    } catch (err) {
+      toast('Error al subir el logo: ' + err.message, 'error');
+    }
+  };
+  reader.readAsDataURL(file);
+  // Reset input para permitir seleccionar el mismo archivo de nuevo
+  e.target.value = '';
+});
+
+$('btnLimpiarLogo').addEventListener('click', async () => {
+  if (!confirm('¿Eliminar el logo de la clínica?')) return;
+  try {
+    await api.removeLogo();
+    config.clinica.logo = '';
+    aplicarBranding(config);
+    actualizarLogoPreview('');
+    toast('Logo eliminado.', 'ok');
+  } catch (err) {
+    toast('Error al eliminar el logo: ' + err.message, 'error');
+  }
 });
 
 $('btnGuardarConfigAvanzada').addEventListener('click', async () => {

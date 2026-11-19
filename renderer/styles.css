@@ -322,6 +322,33 @@ td input:focus { border-color: var(--azul); background: #fff; outline: none; }
   border-radius: 6px;
 }
 
+/* ---------- Selector de logo (v3) ---------- */
+.logo-file-name {
+  font-size: 13px;
+  color: var(--texto-sub);
+  margin-left: 4px;
+}
+.logo-preview-caja {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px dashed var(--borde);
+  border-radius: 8px;
+  text-align: center;
+  background: #f9fafb;
+}
+.logo-preview-caja img {
+  height: 60px;
+  width: auto;
+  max-width: 200px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.logo-preview-nota {
+  font-size: 12px;
+  color: var(--texto-sub);
+  margin: 6px 0 0;
+}
+
 /* ---------- Configuración avanzada (v3) ---------- */
 details.config-avanzado-summary {
   cursor: pointer;

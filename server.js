@@ -742,6 +742,47 @@ app.get('/api/logo', (req, res) => {
   res.sendFile(resuelto);
 });
 
+// Subir logo desde el navegador (v3): recibe base64 y lo guarda en data/
+app.post('/api/upload-logo', (req, res) => {
+  const { dataUrl } = req.body || {};
+  if (!dataUrl || typeof dataUrl !== 'string') {
+    return res.status(400).json({ error: 'Se requiere dataUrl' });
+  }
+  // Validar que es una data URL de imagen
+  const match = dataUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+  if (!match) {
+    return res.status(400).json({ error: 'Formato no válido, debe ser una imagen' });
+  }
+  const ext = match[1]; // png, jpeg, gif, webp, etc.
+  const base64Data = match[2];
+  const buffer = Buffer.from(base64Data, 'base64');
+  // Limitar a 5 MB
+  if (buffer.length > 5 * 1024 * 1024) {
+    return res.status(400).json({ error: 'La imagen es demasiado grande (máx 5 MB)' });
+  }
+  const filename = `logo.${ext}`;
+  const logoPath = path.join(DATA_DIR, filename);
+  const relativePath = path.relative(__dirname, logoPath);
+  fs.writeFileSync(logoPath, buffer);
+  // Actualizar config con la ruta relativa
+  const config = leerConfig();
+  guardarConfig({ ...config, clinica: { ...config.clinica, logo: relativePath } });
+  res.json({ ok: true, path: relativePath });
+});
+
+// Eliminar logo (v3)
+app.post('/api/remove-logo', (_req, res) => {
+  const config = leerConfig();
+  if (config.clinica.logo) {
+    const logoPath = path.join(__dirname, config.clinica.logo);
+    try {
+      if (fs.existsSync(logoPath)) fs.unlinkSync(logoPath);
+    } catch (_) { /* ignorar si no se puede borrar */ }
+  }
+  guardarConfig({ ...config, clinica: { ...config.clinica, logo: '' } });
+  res.json({ ok: true });
+});
+
 app.get('/api/estado', (_req, res) => res.json({ estado: estadoActual(), ultimoError, version: updater.versionEnEjecucion(), versionEnDisco: updater.versionLocal(), fijada: updater.versionFijada(), motor: Motor.nombre, motores: listaMotores(), salud: datosSalud() }));
 
 // Cambio de motor desde la pagina: corta la conexion actual (cada motor tiene su sesion)

@@ -107,8 +107,14 @@
             <label>Color principal: <input type="color" id="clinicaColor" value="#25D366" /></label>
           </div>
           <div class="config-fila">
-            <label>Logo (ruta en data/): <input type="text" id="clinicaLogo" placeholder="Ej. data/logo.png" /></label>
+            <button type="button" id="btnSeleccionarLogo" class="btn btn-gris pequeno">📁 Seleccionar logo</button>
+            <input type="file" id="inputLogoFile" accept="image/png,image/jpeg,image/webp,image/gif" class="oculto" />
+            <span id="logoFileName" class="logo-file-name"></span>
             <button type="button" id="btnLimpiarLogo" class="btn btn-gris pequeno">Quitar logo</button>
+          </div>
+          <div id="logoPreviewCaja" class="logo-preview-caja oculto">
+            <img id="logoPreviewImg" alt="Vista previa del logo" />
+            <p class="logo-preview-nota">Vista previa del logo</p>
           </div>
 
           <h3>Mensajes por especialidad</h3>
