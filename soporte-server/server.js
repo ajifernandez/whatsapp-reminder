@@ -250,33 +250,44 @@ function podarDias(dias) {
   for (const d of Object.keys(dias).sort().slice(0, -DIAS_GUARDADOS)) delete dias[d];
 }
 
-// Disponibilidad = tiempo OK / tiempo observado (sin contar el apagado a proposito)
-function disponibilidad(d) {
-  const total = ['ok', 'warning', 'conectando', 'desconectado', 'offline'].reduce((t, k) => t + (d[k] || 0), 0);
-  return total ? (d.ok || 0) / total : null;
+// Estado predominante: el bucket con más tiempo registrado ese día
+function estadoPredominante(d) {
+  const buckets = ['ok', 'warning', 'desconectado', 'conectando', 'offline'];
+  let maxMs = 0, maxK = null;
+  for (const k of buckets) {
+    const ms = d[k] || 0;
+    if (ms > maxMs) { maxMs = ms; maxK = k; }
+  }
+  return maxK; // null si no hay datos (o solo 'apagada')
 }
 const horasMin = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
 
-// Los ultimos 14 dias como casillas de color, con el detalle al pasar el raton
+// Mapeo de bucket a etiqueta legible y clase CSS
+const ETIQUETA_ESTADO = { ok: 'conectada', warning: 'con problemas', desconectado: 'desconectada', conectando: 'conectando', offline: 'sin señal', apagada: 'apagada' };
+
+// Los ultimos 14 dias como casillas de color, cada una muestra el estado predominante
 function graficaDias(c, ahora) {
   const dias = JSON.parse(JSON.stringify(c.dias || {}));
   if (c.ultimo) acumular(dias, c.estado, c.ultimo, ahora); // el tramo abierto hasta este momento
   const casillas = [];
-  let okTotal = 0, obsTotal = 0;
+  let diasConectados = 0, diasConDatos = 0;
   for (let i = 13; i >= 0; i--) {
     const dia = diaDe(ahora - i * 24 * HORA_MS);
     const d = dias[dia] || {};
-    const pct = disponibilidad(d);
-    const obs = ['ok', 'warning', 'conectando', 'desconectado', 'offline'].reduce((t, k) => t + (d[k] || 0), 0);
-    okTotal += d.ok || 0; obsTotal += obs;
-    const clase = pct === null ? 'sd' : pct >= 0.99 ? 'd-ok' : pct >= 0.9 ? 'd-aviso' : 'd-mal';
-    const detalle = pct === null ? 'sin datos' : `${(pct * 100).toFixed(1).replace('.', ',')} % disponible · OK ${horasMin(d.ok || 0)}`
-      + [['warning', 'con problemas'], ['desconectado', 'desconectada'], ['conectando', 'conectando'], ['offline', 'sin señal'], ['apagada', 'apagada']]
-        .filter(([k]) => d[k]).map(([k, t]) => ` · ${t} ${horasMin(d[k])}`).join('');
+    const pred = estadoPredominante(d);
+    if (pred) diasConDatos++;
+    if (pred === 'ok') diasConectados++;
+    const clase = pred === 'ok' ? 'd-ok' : pred === 'warning' ? 'd-aviso' : pred === 'desconectado' ? 'd-mal' : pred === 'conectando' ? 'd-aviso' : pred === 'offline' ? 'd-mal' : 'sd';
+    const detalle = pred === null ? 'sin datos'
+      : `${esc(ETIQUETA_ESTADO[pred])} (${horasMin(d[pred])})`
+      + Object.entries(d)
+        .filter(([k, v]) => k !== 'apagada' && v && k !== pred)
+        .map(([k, v]) => ` · ${esc(ETIQUETA_ESTADO[k] || k)} ${horasMin(v)}`)
+        .join('');
     casillas.push(`<span class="dia ${clase}" title="${esc(dia + ': ' + detalle)}"></span>`);
   }
-  const resumen = obsTotal ? `${(okTotal / obsTotal * 100).toFixed(1).replace('.', ',')} %` : '—';
-  return `<div class="dias">${casillas.join('')}</div><small>${esc(resumen)} en 14 días, de ${HORA_INI}:00 a ${HORA_FIN}:00</small>`;
+  const resumen = diasConDatos ? `${diasConectados} de ${diasConDatos} días conectada` : '—';
+  return `<div class="dias">${casillas.join('')}</div><small>${esc(resumen)} en 14 días</small>`;
 }
 
 function validarLatido(d) {

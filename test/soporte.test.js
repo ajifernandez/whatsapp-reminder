@@ -205,7 +205,7 @@ const dirsTemporales = [];
     ok('el estado de las clínicas sobrevive a reiniciar el receptor');
   } finally { await r.parar(); }
 
-  // --- disponibilidad por día: datos conocidos precargados (porcentajes, colores y detalle exactos)
+  // --- estado predominante por día: datos conocidos precargados (colores y detalle)
   const dirDisp = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-disp-'));
   dirsTemporales.push(dirDisp);
   fs.mkdirSync(path.join(dirDisp, 'estado'), { recursive: true });
@@ -214,9 +214,12 @@ const dirsTemporales = [];
   fs.writeFileSync(path.join(dirDisp, 'estado', 'clinicas.json'), JSON.stringify({
     [ID1]: { id: ID1, alias: null, host: 'CLINICA-DISP', estado: 'apagada', ultimo: Date.now(), cambios: [],
       dias: {
-        [diaHace(3)]: { ok: 24 * H },                                                    // 100 %  -> verde
-        [diaHace(2)]: { ok: 22 * H, warning: 2 * H },                                    // 91,7 % -> ámbar
-        [diaHace(1)]: { ok: 12 * H, offline: 12 * H },                                   // 50 %   -> rojo
+        [diaHace(3)]: { ok: 24 * H },                                                    // predominante ok -> verde
+        [diaHace(2)]: { ok: 22 * H, warning: 2 * H },                                    // predominante ok -> verde
+        [diaHace(1)]: { ok: 12 * H, offline: 12 * H },                                   // predominante ok (empate, ok primero) -> verde
+        [diaHace(4)]: { warning: 16 * H, ok: 8 * H },                                    // predominante warning -> ámbar
+        [diaHace(6)]: { desconectado: 18 * H, ok: 6 * H },                               // predominante desconectado -> rojo
+        [diaHace(8)]: { offline: 20 * H, ok: 4 * H },                                    // predominante offline -> rojo
         [diaHace(5)]: { apagada: 24 * H }                                                // solo apagada -> sin datos
       } }
   }));
@@ -224,14 +227,25 @@ const dirsTemporales = [];
   try {
     const pag = await r.html('/clinicas?parcial=1');
     const cas = (n) => new RegExp(`<span class="dia ([\\w-]+)" title="${diaHace(n)}: ([^"]*)"`).exec(pag);
-    assert.equal(cas(3)[1], 'd-ok'); assert.match(cas(3)[2], /100,0 % disponible/);
-    assert.equal(cas(2)[1], 'd-aviso'); assert.match(cas(2)[2], /91,7 % disponible.*con problemas 2 h 0 min/);
-    assert.equal(cas(1)[1], 'd-mal'); assert.match(cas(1)[2], /50,0 % disponible.*sin señal 12 h 0 min/);
-    assert.equal(cas(5)[1], 'sd', 'un día solo apagada no cuenta como indisponible'); assert.match(cas(5)[2], /sin datos/);
-    assert.equal(cas(7)[1], 'sd'); // un día sin ningún dato
+    // Día 3: 100% ok -> verde, conectada
+    assert.equal(cas(3)[1], 'd-ok'); assert.match(cas(3)[2], /conectada/);
+    // Día 2: ok predominante (22h vs 2h warning) -> verde
+    assert.equal(cas(2)[1], 'd-ok'); assert.match(cas(2)[2], /conectada.*22 h/); assert.match(cas(2)[2], /con problemas 2 h/);
+    // Día 1: ok y offline empatan (12h cada uno), ok gana por orden -> verde
+    assert.equal(cas(1)[1], 'd-ok'); assert.match(cas(1)[2], /conectada.*12 h/); assert.match(cas(1)[2], /sin señal 12 h/);
+    // Día 4: warning predominante -> ámbar
+    assert.equal(cas(4)[1], 'd-aviso'); assert.match(cas(4)[2], /con problemas.*16 h/);
+    // Día 6: desconectado predominante -> rojo
+    assert.equal(cas(6)[1], 'd-mal'); assert.match(cas(6)[2], /desconectada.*18 h/);
+    // Día 8: offline predominante -> rojo
+    assert.equal(cas(8)[1], 'd-mal'); assert.match(cas(8)[2], /sin señal.*20 h/);
+    // Día 5: solo apagada -> sin datos
+    assert.equal(cas(5)[1], 'sd', 'un día solo apagada no cuenta'); assert.match(cas(5)[2], /sin datos/);
+    // Día 7: sin datos -> gris
+    assert.equal(cas(7)[1], 'sd');
     assert.match(pag, /Últimos 14 días/);
-    assert.match(pag, /\d+,\d % en 14 días/, 'resumen de 14 días');
-    ok('disponibilidad: porcentaje, color (verde ≥99 %, ámbar ≥90 %, rojo) y detalle por día; apagada no cuenta como caída');
+    assert.match(pag, /\d+ de \d+ días conectada/, 'resumen de 14 días');
+    ok('estado predominante: color por estado mayoritario y detalle por día; apagada no cuenta como caída');
   } finally { await r.parar(); }
 
   // --- disponibilidad por día: acumulación real con latidos y un hueco sin señal
