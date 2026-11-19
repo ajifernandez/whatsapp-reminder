@@ -809,6 +809,13 @@ app.get('/api/onboarding', (_req, res) => {
   });
 });
 
+// Resetear onboarding (v3): permite repetir el wizard de configuración inicial
+app.post('/api/reset-onboarding', (_req, res) => {
+  const config = leerConfig();
+  guardarConfig({ ...config, onboardingCompletado: false });
+  res.json({ ok: true, onboardingCompletado: false });
+});
+
 // Exportar citas a CSV (v3)
 app.get('/api/exportar-csv', (_req, res) => {
   const citas = leerCitas();

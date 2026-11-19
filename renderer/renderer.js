@@ -21,6 +21,7 @@ const api = {
   }).then((r) => r.json()),
   exportarCsv: () => fetch('/api/exportar-csv'),
   onboarding: () => fetch('/api/onboarding').then((r) => r.json()),
+  resetOnboarding: () => fetch('/api/reset-onboarding', { method: 'POST' }).then((r) => r.json()),
   conectar: () => fetch('/api/conectar', { method: 'POST' }),
   cerrarSesion: () => fetch('/api/cerrar', { method: 'POST' }),
   cambiarMotor: (motor) => fetch('/api/motor', {
@@ -1033,6 +1034,21 @@ $('btnGuardarConfigAvanzada').addEventListener('click', async () => {
     toast('Configuración guardada.', 'ok');
   } catch (err) {
     toast('No se pudo guardar: ' + err.message, 'error');
+  }
+});
+
+// Reset onboarding: permite repetir el wizard de configuración
+$('btnResetOnboarding').addEventListener('click', async () => {
+  if (!confirm('¿Repetir el asistente de configuración inicial? Esto no borra tus citas ni tu configuración.')) return;
+  try {
+    await api.resetOnboarding();
+    config.onboardingCompletado = false;
+    onboardingPasoActual = 0;
+    $('modalOnboarding').classList.remove('oculto');
+    mostrarPasoOnboarding(0);
+    toast('Onboarding reiniciado.', 'ok');
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
   }
 });
 
