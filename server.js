@@ -815,7 +815,7 @@ let cpuTiempoAnterior = process.hrtime.bigint();
 function cpuDelProceso() {
   const ahora = process.hrtime.bigint();
   const cpu = process.cpuUsage();
-  const deltaCpu = (BigInt(cpu.user) - cpuUsageAnterior.user) + (BigInt(cpu.system) - cpuUsageAnterior.system);
+  const deltaCpu = Number((cpu.user - cpuUsageAnterior.user) + (cpu.system - cpuUsageAnterior.system));
   const deltaTiempo = Number(ahora - cpuTiempoAnterior) / 1e9; // segundos
   cpuUsageAnterior = cpu;
   cpuTiempoAnterior = ahora;
