@@ -933,18 +933,6 @@ function cargarConfigAvanzada(config) {
     $('clinicaLogo').value = config.clinica.logo || '';
   }
 
-  // Antelación (se usa si alguien activa autoEnvio manualmente en config.json)
-  $('horasAntelacion').value = config.horasAntelacion || 24;
-
-  // Horarios de envío
-  const horariosLista = $('horariosEnvioLista');
-  horariosLista.innerHTML = '';
-  if (config.horariosEnvio && config.horariosEnvio.length) {
-    config.horariosEnvio.forEach((h, i) => {
-      agregarHorarioFila(horariosLista, h.desde, h.hasta);
-    });
-  }
-
   // Mensajes por especialidad
   const mensajesLista = $('mensajesEspecialidadLista');
   mensajesLista.innerHTML = '';
@@ -953,19 +941,6 @@ function cargarConfigAvanzada(config) {
       if (esp !== 'default') agregarMensajeFila(mensajesLista, esp, msg);
     });
   }
-}
-
-function agregarHorarioFila(contenedor, desde = '', hasta = '') {
-  const div = document.createElement('div');
-  div.className = 'config-horario-fila';
-  div.innerHTML = `
-    <input type="time" value="${desde}" />
-    <span>hasta</span>
-    <input type="time" value="${hasta}" />
-    <button type="button" class="btn-quitar-config" title="Quitar horario">✕</button>
-  `;
-  div.querySelector('.btn-quitar-config').addEventListener('click', () => div.remove());
-  contenedor.appendChild(div);
 }
 
 function agregarMensajeFila(contenedor, especialidad = '', mensaje = '') {
@@ -987,17 +962,6 @@ function recopilarConfigAvanzada() {
     colorPrimario: $('clinicaColor').value
   };
 
-  const horasAntelacion = parseInt($('horasAntelacion').value, 10);
-
-  // Horarios
-  const horariosEnvio = [];
-  $('horariosEnvioLista').querySelectorAll('.config-horario-fila').forEach((fila) => {
-    const inputs = fila.querySelectorAll('input[type="time"]');
-    if (inputs[0].value && inputs[1].value) {
-      horariosEnvio.push({ desde: inputs[0].value, hasta: inputs[1].value });
-    }
-  });
-
   // Mensajes por especialidad
   const mensajes = {};
   $('mensajesEspecialidadLista').querySelectorAll('.config-mensaje-fila').forEach((fila) => {
@@ -1008,11 +972,10 @@ function recopilarConfigAvanzada() {
     }
   });
 
-  return { clinica, horasAntelacion, horariosEnvio, mensajes };
+  return { clinica, mensajes };
 }
 
 // ---------- Event listeners v3 ----------
-$('btnAnadirHorario').addEventListener('click', () => agregarHorarioFila($('horariosEnvioLista')));
 $('btnAnadirMensajeEsp').addEventListener('click', () => agregarMensajeFila($('mensajesEspecialidadLista')));
 
 $('btnLimpiarLogo').addEventListener('click', () => {
@@ -1024,8 +987,6 @@ $('btnGuardarConfigAvanzada').addEventListener('click', async () => {
   const configAGuardar = {
     ...config,
     clinica: avanzada.clinica,
-    horasAntelacion: avanzada.horasAntelacion,
-    horariosEnvio: avanzada.horariosEnvio.length ? avanzada.horariosEnvio : null,
     mensajes: Object.keys(avanzada.mensajes).length ? avanzada.mensajes : null
   };
   try {

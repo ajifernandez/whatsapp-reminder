@@ -101,10 +101,6 @@ function leerConfig() {
     clinica: { nombre: '', logo: '', colorPrimario: '' },
     // Mensajes por especialidad (v3)
     mensajes: null,
-    // Horarios de envío (v3): ventanas como [{desde:'09:00', hasta:'13:00'}, {desde:'16:00', hasta:'20:00'}]
-    horariosEnvio: null,
-    // Antelación configurable (v3): horas antes de la cita (por defecto 24)
-    horasAntelacion: 24,
     // Onboarding completado (v3)
     onboardingCompletado: false
   };
@@ -126,13 +122,6 @@ function leerConfig() {
     // mensajes: objeto con plantillas por especialidad, o null para usar mensaje global
     const mensajes = datos.mensajes != null && typeof datos.mensajes === 'object' && !Array.isArray(datos.mensajes)
       ? datos.mensajes : null;
-    // horariosEnvio: array de {desde, hasta} o null para sin restricción
-    const horariosEnvio = Array.isArray(datos.horariosEnvio)
-      ? datos.horariosEnvio.filter((h) => typeof h?.desde === 'string' && typeof h?.hasta === 'string')
-      : null;
-    // horasAntelacion: número entero positivo
-    const horasAntelacion = (typeof datos.horasAntelacion === 'number' && datos.horasAntelacion > 0 && datos.horasAntelacion <= 168)
-      ? datos.horasAntelacion : 24;
     // onboardingCompletado: booleano
     const onboardingCompletado = datos.onboardingCompletado === true;
     return {
@@ -141,7 +130,7 @@ function leerConfig() {
       motor: motorDe(datos),
       motorElegido: datos.motorElegido === true,
       latido: datos.latido !== false,
-      clinica, mensajes, horariosEnvio, horasAntelacion, onboardingCompletado
+      clinica, mensajes, onboardingCompletado
     };
   } catch (_) {
     return configBase;
@@ -166,17 +155,10 @@ function guardarConfig(config) {
   // Mensajes por especialidad (v3)
   const mensajes = config?.mensajes != null && typeof config.mensajes === 'object' && !Array.isArray(config.mensajes)
     ? config.mensajes : actual.mensajes;
-  // Horarios de envío (v3)
-  const horariosEnvio = Array.isArray(config?.horariosEnvio)
-    ? config.horariosEnvio.filter((h) => typeof h?.desde === 'string' && typeof h?.hasta === 'string')
-    : actual.horariosEnvio;
-  // Antelación (v3)
-  const horasAntelacion = (typeof config?.horasAntelacion === 'number' && config.horasAntelacion > 0 && config.horasAntelacion <= 168)
-    ? config.horasAntelacion : actual.horasAntelacion;
   // Onboarding (v3)
   const onboardingCompletado = typeof config?.onboardingCompletado === 'boolean' ? config.onboardingCompletado : actual.onboardingCompletado;
   // autoEnvio forzado a false en v3: envío siempre manual
-  const nuevo = { ...actual, mensaje, autoEnvio: false, motor, motorElegido, latido, clinica, mensajes, horariosEnvio, horasAntelacion, onboardingCompletado };
+  const nuevo = { ...actual, mensaje, autoEnvio: false, motor, motorElegido, latido, clinica, mensajes, onboardingCompletado };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(nuevo, null, 2), 'utf8');
   return nuevo;
 }
@@ -669,93 +651,6 @@ async function enviarRecordatorios(citas) {
   }
   return { enviados, fallidos, omitidos, sinRespuesta, total: lista.length };
 }
-
-// ---------- Envío automático (horasAntelacion antes de la cita, configurable en v3) ----------
-const INTERVALO_AUTO_MS = Number(process.env.INTERVALO_AUTO_MS) || 45 * 1000; // variable: solo para pruebas
-const PAUSA_AUTO_SIN_RESPUESTA_MS = 5 * 60 * 1000;
-let autoPausadoHasta = 0;
-
-// Comprueba si la hora actual está dentro de las ventanas de envío configuradas (v3)
-// Si no hay horarios configurados, siempre devuelve true (sin restricción)
-function dentroHorarioEnvio(horariosEnvio) {
-  if (!horariosEnvio || horariosEnvio.length === 0) return true;
-  const ahora = new Date();
-  const horaActual = String(ahora.getHours()).padStart(2, '0') + ':' + String(ahora.getMinutes()).padStart(2, '0');
-  return horariosEnvio.some((h) => horaActual >= h.desde && horaActual <= h.hasta);
-}
-
-function fechaHoraCita(cita) {
-  const fLimpia = limpiarString(cita.fecha);
-  const hLimpia = normalizarHoraA24(cita.hora);
-  if (!fLimpia || !hLimpia) return null;
-
-  let anio, mes, dia;
-
-  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fLimpia);
-  if (m) {
-    anio = Number(m[1]);
-    mes = Number(m[2]) - 1;
-    dia = Number(m[3]);
-  } else {
-    m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(fLimpia);
-    if (m) {
-      anio = Number(m[3]);
-      mes = Number(m[2]) - 1;
-      dia = Number(m[1]);
-    } else {
-      return null;
-    }
-  }
-
-  const hMatch = /^(\d{2}):(\d{2})$/.exec(hLimpia);
-  if (!hMatch) return null;
-
-  const d = new Date(anio, mes, dia, Number(hMatch[1]), Number(hMatch[2]));
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-let autoEnvioEnCurso = false;
-async function cicloAutoEnvio() {
-  if (autoEnvioEnCurso || !clientReady || Date.now() < autoPausadoHasta) return;
-  const config = leerConfig();
-  if (!config.autoEnvio) return;
-
-  // Horarios de envío (v3): si están configurados, solo enviar dentro de las ventanas
-  if (!dentroHorarioEnvio(config.horariosEnvio)) return;
-
-  const horasAntelacion = config.horasAntelacion || 24;
-  const ahora = Date.now();
-  const limite = ahora + horasAntelacion * 3600 * 1000;
-  const pendientes = leerCitas().filter((c) => {
-    // estadoEnvio: ya intentado (enviado/fallido/omitido); recordatorioEnviado: compatibilidad con ficheros antiguos
-    if (c.estadoEnvio || c.recordatorioEnviado || !c.telefono) return false;
-    const dt = fechaHoraCita(c);
-    return dt && dt.getTime() > ahora && dt.getTime() <= limite;
-  });
-  if (pendientes.length === 0) return;
-
-  autoEnvioEnCurso = true;
-  try {
-    emitir('log', { tipo: 'info', texto: `Envío automático: ${pendientes.length} cita(s) a menos de ${horasAntelacion} h.` });
-    for (let i = 0; i < pendientes.length; i++) {
-      if (!clientReady) break;
-      if (i > 0) await pausa(2500 + Math.random() * 2500);
-      const resultado = await enviarUna(pendientes[i], plantillaParaCita(pendientes[i], config));
-      contarEnvio(resultado);
-      if (resultado === 'sin_respuesta') {
-        // no es culpa de la cita: sin marcar, y se espera antes de volver a intentarlo
-        autoPausadoHasta = Date.now() + PAUSA_AUTO_SIN_RESPUESTA_MS;
-        emitir('log', { tipo: 'aviso', texto: `Envío automático en pausa ${PAUSA_AUTO_SIN_RESPUESTA_MS / 60000} min: WhatsApp no responde. Las citas pendientes se reintentarán.` });
-        break;
-      }
-      // se marca también si falló, para no reintentar cada minuto y saturar
-      marcarEstadoEnvio([pendientes[i]], resultado);
-    }
-  } finally {
-    autoEnvioEnCurso = false;
-  }
-}
-setInterval(cicloAutoEnvio, INTERVALO_AUTO_MS);
 
 // ---------- Servidor HTTP ----------
 const app = express();
