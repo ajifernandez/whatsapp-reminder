@@ -77,7 +77,12 @@ const dirsTemporales = [];
     await pausa(2300);
     await r.latido(base(ID1, { host: 'CLINICA-OK' })); // esta sigue viva
     pagina = await r.html('/clinicas');
-    const claseDe = (host) => /class="chip (\w+)"/.exec(pagina.split('<tr>').find((f) => f.includes(host)))[1];
+    const claseDe = (host) => {
+      const fila = pagina.split('<tr>').find((f) => f.includes(host));
+      // Extrae el primer chip de estado del primer <td> (evita el chip de riesgo en el segundo <td>)
+      const td = fila.split('<td>')[1];
+      return /class="chip (\w+)"/.exec(td)[1];
+    };
     assert.equal(claseDe('CLINICA-OK'), 'ok');
     assert.equal(claseDe('CLINICA-AVISO'), 'offline');
     assert.equal(claseDe('CLINICA-CAIDA'), 'offline');
@@ -123,7 +128,8 @@ const dirsTemporales = [];
     ok('host y causa con HTML salen escapados');
 
     // --- no se mezclan con los diagnósticos
-    assert.match(await r.html('/diagnosticos'), /Diagnósticos recibidos \(0,/);
+    assert.match(await r.html('/diagnosticos'), /Diagnósticos recibidos/);
+    assert.match(await r.html('/diagnosticos'), /0 informes/);
     assert.ok(!(await r.html('/diagnosticos')).includes('clinicas.json'));
     ok('el estado de las clínicas no aparece en la lista de diagnósticos');
 
@@ -143,14 +149,14 @@ const dirsTemporales = [];
     await pedir(ID1);
     assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, orden, 'pedir otra vez no duplica: sigue la misma orden');
     let fila = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-OK'));
-    assert.match(fila, /diagnóstico pedido/); assert.ok(!fila.includes('data-pedir'), 'pendiente: sin botón');
+    assert.match(fila, /Diagnóstico pedido/); assert.ok(!fila.includes('data-pedir'), 'pendiente: sin botón');
     assert.match(fila, /en el próximo latido/);
     // llega el informe (con el id de la instalación): cumple la petición y se enlaza a la fila
     const informe = { version: '2.5.0', estado: 'conectado', log: [], latido: { id: ID1 } };
     assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ ...informe, host: 'CLINICA-OK' }) })).status, 200);
     assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, null, 'cumplida: ya no se pide');
     fila = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-OK'));
-    const enlace = /último diagnóstico: <a href="\/f\/([^"]+)">/.exec(fila);
+    const enlace = /Último: <a href="\/f\/([^"]+)"/.exec(fila);
     assert.ok(enlace, 'enlace al último diagnóstico'); assert.match(fila, /data-pedir/, 'vuelve el botón');
     assert.equal((await r.pedir('/f/' + enlace[1])).status, 200, 'el enlace abre el informe');
     // un informe de una instalación desconocida o sin id no rompe nada
@@ -164,15 +170,17 @@ const dirsTemporales = [];
     await r.latido(base(ID2, { host: 'CLINICA-AVISO', estado: 'conectado' }));
     pagina = await r.html('/clinicas?parcial=1');
     const filaAviso = pagina.split('<tr>').find((f) => f.includes('CLINICA-AVISO'));
-    assert.match(filaAviso, /historial \(\d+\)/, 'hay desplegable de historial');
-    const items = [...filaAviso.matchAll(/<li>[^<]*· (\w+)<\/li>/g)].map((m) => m[1]);
+    assert.match(filaAviso, /Historial \(\d+\)/, 'hay desplegable de historial');
+    // Extrae solo del bloque <details> (historial), no de los chips de la fila principal
+    const detailsBlock = filaAviso.split('<details>')[1]?.split('</details>')[0] || '';
+    const items = [...detailsBlock.matchAll(/>conectado<\/span>|>degradado<\/span>|>conectando<\/span>|>desconectado<\/span>|>error<\/span>|>apagada<\/span>/g)].map((m) => m[0].slice(1, -7));
     // la más reciente primero: conectado (la última), degradado, conectado (la primera)
     assert.deepEqual(items.slice(0, 3), ['conectado', 'degradado', 'conectado'], 'orden: más reciente primero');
     const filaOk = pagina.split('<tr>').find((f) => f.includes('CLINICA-OK'));
     const idCerrada = 'a1b2c3d4-0000-4000-8000-00000000000b';
     await r.latido(base(idCerrada, { host: 'CLINICA-SIN-CAMBIOS', estado: 'conectado' }));
     const filaSinCambios = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-SIN-CAMBIOS'));
-    assert.ok(filaSinCambios.includes('historial (1)'), 'el primer estado cuenta como una transición');
+    assert.ok(filaSinCambios.includes('Historial (1)'), 'el primer estado cuenta como una transición');
     assert.ok(filaOk && typeof filaOk === 'string', 'la fila OK existe');
     ok('historial: cada instalación muestra sus últimas transiciones en un desplegable');
 

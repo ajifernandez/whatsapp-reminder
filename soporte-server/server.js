@@ -77,24 +77,84 @@ function autorizar(req, res) {
   return false;
 }
 
-const ESTILO = `body{font:14px system-ui;margin:16px;max-width:1100px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #ddd;vertical-align:top}small{color:#666}
-nav{margin-bottom:14px;font-size:15px}nav a{margin-right:14px;color:#2b6cb0;text-decoration:none}nav a.activa{font-weight:700;color:#111;border-bottom:2px solid #2b6cb0}
-.chip{display:inline-block;padding:2px 10px;border-radius:12px;font-weight:600;font-size:13px;white-space:nowrap}
-.ok{background:#dcfce7;color:#166534}.warning{background:#fef3c7;color:#92400e}.conectando{background:#dbeafe;color:#1e40af}
-.desconectado{background:#fee2e2;color:#991b1b}.offline{background:#4b5563;color:#fff}.apagada{background:#e5e7eb;color:#374151}
-.riesgo-alto{background:#fecaca;color:#991b1b}.riesgo-medio{background:#fef3c7;color:#92400e}.riesgo-bajo{background:#dcfce7;color:#166534}
-.dias{display:flex;gap:2px;margin-bottom:2px}.dia{display:inline-block;width:9px;height:20px;border-radius:2px;background:#e5e7eb}
-.d-ok{background:#22c55e}.d-aviso{background:#f59e0b}.d-mal{background:#ef4444}.sd{background:#e5e7eb}
-.historial{margin:4px 0 0;padding-left:18px;font-size:12px;color:#444}.historial li{margin:2px 0}
-.resumen{margin:0 0 14px}.resumen .chip{margin-right:8px}a.accion{font-size:12px;margin-left:8px;color:#2b6cb0}
-.alerta{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px}
-.alerta small{color:#991b1b}`;
+const ESTILO = `:root{--bg:#f8fafc;--surface:#fff;--border:#e2e8f0;--text:#0f172a;--text-secondary:#64748b;--primary:#2563eb;--primary-hover:#1d4ed8;--success:#16a34a;--success-bg:#dcfce7;--success-text:#166534;--warning:#d97706;--warning-bg:#fef3c7;--warning-text:#92400e;--danger:#dc2626;--danger-bg:#fee2e2;--danger-text:#991b1b;--info:#2563eb;--info-bg:#dbeafe;--info-text:#1e40af;--gray:#64748b;--gray-bg:#f1f5f9;--radius:8px;--shadow:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);--shadow-lg:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.06)}
+*{box-sizing:border-box}
+body{font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;background:var(--bg);color:var(--text)}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 20px;margin-bottom:24px;box-shadow:var(--shadow)}
+header h1{margin:0 0 4px;font-size:20px;font-weight:700;color:var(--text)}
+header p{margin:0;font-size:13px;color:var(--text-secondary)}
+nav{display:flex;gap:24px;margin-top:12px}
+nav a{color:var(--text-secondary);text-decoration:none;font-weight:500;padding:4px 0;border-bottom:2px solid transparent;transition:all .15s}
+nav a:hover{color:var(--primary)}
+nav a.activa{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+h1{font-size:24px;font-weight:700;margin:0 0 16px;color:var(--text)}
+h2{font-size:18px;font-weight:600;margin:0 0 12px}
+.chip{display:inline-flex;align-items:center;padding:3px 10px;border-radius:9999px;font-weight:600;font-size:12px;line-height:1.4;white-space:nowrap}
+.ok{background:var(--success-bg);color:var(--success-text)}.warning{background:var(--warning-bg);color:var(--warning-text)}.conectando{background:var(--info-bg);color:var(--info-text)}
+.desconectado{background:var(--danger-bg);color:var(--danger-text)}.offline{background:var(--gray);color:#fff}.apagada{background:var(--gray-bg);color:var(--gray)}
+.riesgo-alto{background:var(--danger-bg);color:var(--danger-text)}.riesgo-medio{background:var(--warning-bg);color:var(--warning-text)}.riesgo-bajo{background:var(--success-bg);color:var(--success-text)}
+.resumen{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;padding:16px;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow)}
+.resumen .chip{font-size:13px;padding:4px 12px}
+.alerta{background:var(--danger-bg);border:1px solid #fecaca;border-radius:var(--radius);padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.6}
+.alerta strong{color:var(--danger-text)}
+.alerta small{color:var(--danger-text)}
+table{width:100%;border-collapse:collapse;background:var(--surface);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+thead{background:#f8fafc}
+th{font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);padding:12px 14px;text-align:left;border-bottom:2px solid var(--border)}
+td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:top;font-size:13px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+small{color:var(--text-secondary);font-size:12px}
+a.accion{color:var(--primary);text-decoration:none;font-size:12px;font-weight:500;margin-left:8px;transition:color .15s}
+a.accion:hover{color:var(--primary-hover);text-decoration:underline}
+.dias{display:flex;gap:3px;margin-bottom:6px}
+.dia{display:inline-block;width:11px;height:22px;border-radius:3px;background:var(--gray-bg);transition:transform .1s}
+.dia:hover{transform:scaleY(1.2)}
+.d-ok{background:var(--success)}.d-aviso{background:var(--warning)}.d-mal{background:var(--danger)}.sd{background:var(--gray-bg)}
+.historial{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--text-secondary)}
+.historial li{margin:3px 0}
+.card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:12px}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.card-title{font-weight:600;font-size:15px}
+.card-body{font-size:13px;line-height:1.6}
+.card-footer{display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;transition:all .15s;border:none;cursor:pointer}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
+.btn-secondary{background:var(--gray-bg);color:var(--text)}.btn-secondary:hover{background:var(--border)}
+.btn-danger{background:var(--danger-bg);color:var(--danger-text)}.btn-danger:hover{background:#fecaca}
+.grid{display:grid;gap:12px}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.stat{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;text-align:center}
+.stat-value{font-size:28px;font-weight:700;color:var(--text)}
+.stat-label{font-size:12px;color:var(--text-secondary);margin-top:4px}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600}
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:768px){
+.container{padding:12px}
+header{padding:12px 16px}
+header h1{font-size:18px}
+nav{gap:16px}
+h1{font-size:20px}
+.resumen{padding:12px}
+table{display:block;overflow-x:auto}
+.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}
+.stat{padding:12px}
+.stat-value{font-size:24px}
+}`;
 
 function plantilla(titulo, activa, cuerpo, extra = '') {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(titulo)}</title><style>${ESTILO}</style>
+<header class="container">
+<h1>📊 Panel de Soporte</h1>
+<p>Monitor de clínicas · WhatsApp Reminder</p>
 <nav><a href="/clinicas"${activa === 'clinicas' ? ' class="activa"' : ''}>Clínicas</a><a href="/diagnosticos"${activa === 'diagnosticos' ? ' class="activa"' : ''}>Diagnósticos</a></nav>
-${cuerpo}${extra}`;
+</header>
+<div class="container">${cuerpo}</div>${extra}`;
 }
 
 function paginaListado() {
@@ -107,10 +167,11 @@ function paginaListado() {
     const u = encodeURIComponent(n);
     return `<tr><td>${esc(d.host)}<br><small>${esc(d._ip)}</small></td><td>${esc(fecha)}</td><td>${esc(d.version)}</td>`
       + `<td>${esc(d.estado)}${d.ultimoError ? `<br><small>${esc(String(d.ultimoError).slice(0, 80))}</small>` : ''}</td>`
-      + `<td><a href="/f/${u}">ver</a> · <a href="/f/${u}?d=1">descargar</a> · <a href="#" data-borrar="${esc(n)}">borrar</a></td></tr>`;
+      + `<td><a href="/f/${u}" class="accion">ver</a> · <a href="/f/${u}?d=1" class="accion">descargar</a> · <a href="#" data-borrar="${esc(n)}" class="accion" style="color:var(--danger-text)">borrar</a></td></tr>`;
   });
-  return plantilla('Diagnósticos', 'diagnosticos', `<h1>Diagnósticos recibidos (${todos.length}, ${kb} KB)</h1>
-<table><tr><th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th></th></tr>${filas.join('') || '<tr><td colspan=5>Sin informes todavía</td></tr>'}</table>`, `
+  return plantilla('Diagnósticos', 'diagnosticos', `<h1>📋 Diagnósticos recibidos</h1>
+<div class="resumen"><span class="chip" style="background:var(--info-bg);color:var(--info-text)">${todos.length} informes</span><span class="chip" style="background:var(--gray-bg);color:var(--gray)">${kb} KB</span></div>
+<table><thead><tr><th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${filas.join('') || '<tr><td colspan=5 style="text-align:center;padding:24px;color:var(--text-secondary)">Sin informes todavía</td></tr>'}</tbody></table>`, `
 <script>
 document.addEventListener('click', async (e) => {
   const n = e.target.dataset && e.target.dataset.borrar;
@@ -278,17 +339,21 @@ function diagnosticoHtml(c, v, ahora) {
   const pendiente = c.orden && ahora - c.orden.t < ORDEN_MAX_MS;
   const espera = ['offline', 'apagada'].includes(v) ? 'cuando la aplicación vuelva a dar señal' : 'en el próximo latido (como mucho 5 min)';
   const accion = pendiente
-    ? `<br><small>⏳ diagnóstico pedido ${esc(hace(ahora - c.orden.t))}: llegará ${espera}</small>`
-    : `<br><a href="#" class="accion" style="margin-left:0" data-pedir="${esc(c.id)}">pedir diagnóstico</a>`;
-  const ultimo = c.ultimoDiag ? `<br><small>último diagnóstico: <a href="/f/${encodeURIComponent(c.ultimoDiag.archivo)}">${esc(hace(ahora - c.ultimoDiag.t))}</a></small>` : '';
+    ? `<br><small>⏳ Diagnóstico pedido ${esc(hace(ahora - c.orden.t))}: llegará ${espera}</small>`
+    : `<br><a href="#" class="accion" style="margin-left:0" data-pedir="${esc(c.id)}">📋 Pedir diagnóstico</a>`;
+  const ultimo = c.ultimoDiag ? `<br><small>Último: <a href="/f/${encodeURIComponent(c.ultimoDiag.archivo)}" class="accion" style="margin-left:0">${esc(hace(ahora - c.ultimoDiag.t))}</a></small>` : '';
   return accion + ultimo;
 }
 
 // Historial de transiciones (las ultimas 20) en un desplegable de la fila
 function historialHtml(c) {
   if (!c.cambios || !c.cambios.length) return '';
-  const lineas = c.cambios.slice().reverse().map((x) => `<li>${esc(new Date(x.t).toLocaleString('es-ES', { timeZone: ZONA, dateStyle: 'short', timeStyle: 'short' }))} · ${esc(x.estado)}</li>`).join('');
-  return `<details><summary><small>historial (${c.cambios.length})</small></summary><ul class="historial">${lineas}</ul></details>`;
+  const estadoClass = (e) => ({ conectado: 'ok', degradado: 'warning', conectando: 'conectando', desconectado: 'desconectado', error: 'desconectado', apagada: 'apagada' }[e] || 'offline');
+  const lineas = c.cambios.slice().reverse().map((x) => {
+    const fecha = new Date(x.t).toLocaleString('es-ES', { timeZone: ZONA, dateStyle: 'short', timeStyle: 'short' });
+    return `<li><span class="chip ${estadoClass(x.estado)}" style="font-size:10px;padding:1px 6px">${esc(x.estado)}</span> ${esc(fecha)}</li>`;
+  }).join('');
+  return `<details><summary><small>📜 Historial (${c.cambios.length})</small></summary><ul class="historial">${lineas}</ul></details>`;
 }
 
 // Alertas proactivas: problemas que requieren atención inmediata
@@ -297,17 +362,17 @@ function alertasProactivas() {
   const alertas = [];
   for (const c of Object.values(clinicas)) {
     if (c.enNube) {
-      alertas.push(`<b>${esc(c.alias || c.host)}</b>: la aplicación está en un directorio sincronizado en la nube (OneDrive/Dropbox/Google Drive). Riesgo alto de corrupción de datos.`);
+      alertas.push(`🔴 <b>${esc(c.alias || c.host)}</b>: la aplicación está en un directorio sincronizado en la nube (OneDrive/Dropbox/Google Drive). <strong>Riesgo alto de corrupción de datos.</strong>`);
     }
     if (ahora - c.ultimo > 24 * 3600e3 && c.estado !== 'apagada') {
-      alertas.push(`<b>${esc(c.alias || c.host)}</b>: lleva más de 24 horas sin señal. Posible problema grave.`);
+      alertas.push(`🔴 <b>${esc(c.alias || c.host)}</b>: lleva más de 24 horas sin señal. <strong>Posible problema grave.</strong>`);
     }
     if (c.memMB != null && c.memMB > 2000) {
-      alertas.push(`<b>${esc(c.alias || c.host)}</b>: consume más de 2 GB de RAM (${c.memMB} MB). Posible fuga de memoria.`);
+      alertas.push(`🟡 <b>${esc(c.alias || c.host)}</b>: consume más de 2 GB de RAM (${c.memMB} MB). Posible fuga de memoria.`);
     }
   }
   if (alertas.length === 0) return '';
-  return `<div class="alerta"><strong>⚠️ Alertas:</strong><br>${alertas.join('<br>')}</div>`;
+  return `<div class="alerta"><strong>⚠️ ${alertas.length} alerta${alertas.length > 1 ? 's' : ''} activa${alertas.length > 1 ? 's' : ''}</strong><br>${alertas.join('<br>')}</div>`;
 }
 
 // Solo lo que cambia (resumen y tabla): la pagina lo pide cada pocos segundos y lo sustituye
@@ -334,7 +399,7 @@ function contenidoClinicas() {
 <td><span class="chip ${v}">${esc(ETIQUETA[v])}</span></td>
 <td><span class="chip riesgo-${riesgo}">riesgo ${esc(riesgo)}</span></td>
 <td><b>${esc(c.alias || c.host || 'sin nombre')}</b>${c.alias ? `<br><small>${esc(c.host)}</small>` : ''}<br><small title="${esc(c.id)}">${esc(c.id.slice(0, 8))}</small>
-<a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}">olvidar</a>
+<a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}" style="color:var(--danger-text)">olvidar</a>
 ${diagnosticoHtml(c, v, ahora)}</td>
 <td>${esc(detalle(c, v, ahora))}${tecnicoHtml}</td>
 <td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
@@ -344,15 +409,18 @@ ${diagnosticoHtml(c, v, ahora)}</td>
 <td><small>${esc(c.ip)}</small>${historialHtml(c)}</td></tr>`;
   });
   const alertas = alertasProactivas();
-  return `${alertas}<h1>Clínicas (${filas.length})</h1>
-<p class="resumen">${resumen} ${resumenRiesgo ? '<br>' + resumenRiesgo : ''}</p>
-<table><tr><th>Estado</th><th>Riesgo</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>Últimos 14 días</th><th>IP</th></tr>${html.join('') || '<tr><td colspan=9>Sin clínicas todavía: aparecen cuando una aplicación 2.4 o posterior manda su primer latido.</td></tr>'}</table>
-<p><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos.</small></p>`;
+  return `${alertas}<h1>🏥 Clínicas (${filas.length})</h1>
+<div class="resumen">${resumen} ${resumenRiesgo ? '<br>' + resumenRiesgo : ''}</div>
+<table><thead><tr><th>Estado</th><th>Riesgo</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>Últimos 14 días</th><th>IP</th></tr></thead><tbody>${html.join('') || '<tr><td colspan=9 style="text-align:center;padding:32px;color:var(--text-secondary)">Sin clínicas todavía: aparecen cuando una aplicación manda su primer latido.</td></tr>'}</tbody></table>
+<p style="margin-top:16px"><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos.</small></p>`;
 }
 
 function paginaClinicas() {
   return plantilla('Clínicas', 'clinicas', `<div id="contenido">${contenidoClinicas()}</div>
-<p><small id="actualizado">Se actualiza sola cada ${REFRESCO_S} s.</small></p>`, `
+<div style="margin-top:16px;padding:12px 16px;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center">
+<small id="actualizado">🔄 Se actualiza sola cada ${REFRESCO_S} s.</small>
+<small style="color:var(--text-secondary)">Última actualización: <span id="ultimaHora">—</span></small>
+</div>`, `
 <script>
 document.addEventListener('click', async (e) => {
   const d = e.target.dataset || {};
@@ -379,13 +447,16 @@ async function refrescar() {
   if (document.hidden) return;
   try {
     const r = await fetch('/clinicas?parcial=1', { cache: 'no-store' });
-    if (r.status === 401) { document.getElementById('actualizado').textContent = 'La sesión ha caducado: recarga la página.'; return; }
+    if (r.status === 401) { document.getElementById('actualizado').textContent = '⚠️ La sesión ha caducado: recarga la página.'; return; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     document.getElementById('contenido').innerHTML = await r.text();
     fallos = 0;
-    document.getElementById('actualizado').textContent = 'Actualizado a las ' + new Date().toLocaleTimeString('es-ES') + ' · se actualiza sola cada ${REFRESCO_S} s.';
+    const ahora = new Date().toLocaleTimeString('es-ES');
+    document.getElementById('actualizado').textContent = '✅ Actualizado a las ' + ahora;
+    const elHora = document.getElementById('ultimaHora');
+    if (elHora) elHora.textContent = ahora + ' · auto-actualización cada ${REFRESCO_S} s';
   } catch (e) {
-    if (++fallos >= 2) document.getElementById('actualizado').textContent = 'No se puede contactar con el servidor de soporte (¿sin conexión?). Se sigue intentando.';
+    if (++fallos >= 2) document.getElementById('actualizado').textContent = '⚠️ No se puede contactar con el servidor de soporte. Se sigue intentando...';
   }
 }
 setInterval(refrescar, ${REFRESCO_S * 1000});
