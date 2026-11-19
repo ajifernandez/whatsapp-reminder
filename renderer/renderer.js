@@ -1128,6 +1128,11 @@ function mostrarPasoOnboarding(paso) {
       $('onboardingQrEstado').className = 'onboarding-estado esperando';
       btnSig.textContent = 'Saltar este paso';
     } else {
+      // Ya conectado: mostrar mensaje de éxito y ocultar botón de conexión
+      $('btnOnboardingConectar').classList.add('oculto');
+      $('onboardingQrCaja').classList.add('oculto');
+      $('onboardingQrEstado').textContent = '✅ WhatsApp ya está conectado. ¡Perfecto!';
+      $('onboardingQrEstado').className = 'onboarding-estado';
       btnSig.textContent = 'Siguiente →';
     }
   } else {
@@ -1244,6 +1249,7 @@ function actualizarEstadoOnboarding(estadoData) {
       estadoEl.textContent = '✅ WhatsApp conectado';
       estadoEl.className = 'onboarding-estado';
       btnConectar.classList.add('oculto');
+      qrCaja.classList.add('oculto');
     } else if (estadoData === 'conectando') {
       // Se ha pulsado Conectar y el servidor está generando el QR
       if (qrCaja.classList.contains('oculto')) {
