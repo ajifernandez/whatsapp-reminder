@@ -108,9 +108,11 @@ tr:hover td{background:#f8fafc}
 small{color:var(--text-secondary);font-size:12px}
 a.accion{color:var(--primary);text-decoration:none;font-size:12px;font-weight:500;margin-left:8px;transition:color .15s}
 a.accion:hover{color:var(--primary-hover);text-decoration:underline}
-.dias{display:flex;gap:3px;margin-bottom:6px}
+.dias{display:flex;gap:2px;margin-bottom:6px}
+.dia-celda{display:flex;flex-direction:column;align-items:center;gap:2px}
 .dia{display:inline-block;width:11px;height:22px;border-radius:3px;background:var(--gray-bg);transition:transform .1s}
 .dia:hover{transform:scaleY(1.2)}
+.dia-label{font-size:9px;color:var(--text-secondary);line-height:1}
 .d-ok{background:var(--success)}.d-aviso{background:var(--warning)}.d-mal{background:var(--danger)}.sd{background:var(--gray-bg)}
 .historial{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--text-secondary)}
 .historial li{margin:3px 0}
@@ -284,7 +286,9 @@ function graficaDias(c, ahora) {
         .filter(([k, v]) => k !== 'apagada' && v && k !== pred)
         .map(([k, v]) => ` · ${esc(ETIQUETA_ESTADO[k] || k)} ${horasMin(v)}`)
         .join('');
-    casillas.push(`<span class="dia ${clase}" title="${esc(dia + ': ' + detalle)}"></span>`);
+    const diaSemana = new Date(dia + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'short' }).replace('.', '');
+    const diaCorto = dia.slice(5, 7) + '/' + dia.slice(0, 4);
+    casillas.push(`<span class="dia-celda" title="${esc(dia + ': ' + detalle)}"><span class="dia ${clase}"></span><span class="dia-label">${esc(diaSemana)}</span></span>`);
   }
   const resumen = diasConDatos ? `${diasConectados} de ${diasConDatos} días conectada` : '—';
   return `<div class="dias">${casillas.join('')}</div><small>${esc(resumen)} en 14 días</small>`;

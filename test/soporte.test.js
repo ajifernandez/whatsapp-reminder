@@ -226,23 +226,24 @@ const dirsTemporales = [];
   r = await arrancar({ dir: dirDisp, env: { OFFLINE_MIN: '60' } });
   try {
     const pag = await r.html('/clinicas?parcial=1');
-    const cas = (n) => new RegExp(`<span class="dia ([\\w-]+)" title="${diaHace(n)}: ([^"]*)"`).exec(pag);
+    const cas = (n) => new RegExp(`<span class="dia-celda" title="${diaHace(n)}: ([^"]*)"><span class="dia ([\\w-]+)"`).exec(pag);
+    // Grupo 1 = título (detalle), Grupo 2 = clase de color
     // Día 3: 100% ok -> verde, conectada
-    assert.equal(cas(3)[1], 'd-ok'); assert.match(cas(3)[2], /conectada/);
+    assert.equal(cas(3)[2], 'd-ok'); assert.match(cas(3)[1], /conectada/);
     // Día 2: ok predominante (22h vs 2h warning) -> verde
-    assert.equal(cas(2)[1], 'd-ok'); assert.match(cas(2)[2], /conectada.*22 h/); assert.match(cas(2)[2], /con problemas 2 h/);
+    assert.equal(cas(2)[2], 'd-ok'); assert.match(cas(2)[1], /conectada.*22 h/); assert.match(cas(2)[1], /con problemas 2 h/);
     // Día 1: ok y offline empatan (12h cada uno), ok gana por orden -> verde
-    assert.equal(cas(1)[1], 'd-ok'); assert.match(cas(1)[2], /conectada.*12 h/); assert.match(cas(1)[2], /sin señal 12 h/);
+    assert.equal(cas(1)[2], 'd-ok'); assert.match(cas(1)[1], /conectada.*12 h/); assert.match(cas(1)[1], /sin señal 12 h/);
     // Día 4: warning predominante -> ámbar
-    assert.equal(cas(4)[1], 'd-aviso'); assert.match(cas(4)[2], /con problemas.*16 h/);
+    assert.equal(cas(4)[2], 'd-aviso'); assert.match(cas(4)[1], /con problemas.*16 h/);
     // Día 6: desconectado predominante -> rojo
-    assert.equal(cas(6)[1], 'd-mal'); assert.match(cas(6)[2], /desconectada.*18 h/);
+    assert.equal(cas(6)[2], 'd-mal'); assert.match(cas(6)[1], /desconectada.*18 h/);
     // Día 8: offline predominante -> rojo
-    assert.equal(cas(8)[1], 'd-mal'); assert.match(cas(8)[2], /sin señal.*20 h/);
+    assert.equal(cas(8)[2], 'd-mal'); assert.match(cas(8)[1], /sin señal.*20 h/);
     // Día 5: solo apagada -> sin datos
-    assert.equal(cas(5)[1], 'sd', 'un día solo apagada no cuenta'); assert.match(cas(5)[2], /sin datos/);
+    assert.equal(cas(5)[2], 'sd', 'un día solo apagada no cuenta'); assert.match(cas(5)[1], /sin datos/);
     // Día 7: sin datos -> gris
-    assert.equal(cas(7)[1], 'sd');
+    assert.equal(cas(7)[2], 'sd');
     assert.match(pag, /Últimos 14 días/);
     assert.match(pag, /\d+ de \d+ días conectada/, 'resumen de 14 días');
     ok('estado predominante: color por estado mayoritario y detalle por día; apagada no cuenta como caída');
