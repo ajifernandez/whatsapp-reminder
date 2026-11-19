@@ -123,7 +123,9 @@ function leerConfig() {
     const mensajes = datos.mensajes != null && typeof datos.mensajes === 'object' && !Array.isArray(datos.mensajes)
       ? datos.mensajes : null;
     // onboardingCompletado: booleano
-    const onboardingCompletado = datos.onboardingCompletado === true;
+    // Si no existe el campo (clínica existente que actualiza a v3), se considera completado
+    // para no mostrar el wizard a clínicas que ya están en producción.
+    const onboardingCompletado = datos.onboardingCompletado === false ? false : true;
     return {
       mensaje: typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje : MENSAJE_POR_DEFECTO,
       autoEnvio: false, // v3: envío siempre manual, nunca automático
