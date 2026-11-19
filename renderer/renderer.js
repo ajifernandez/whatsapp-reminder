@@ -1078,8 +1078,16 @@ function mostrarPasoOnboarding(paso) {
   if (paso === TOTAL_ONBOARDING_PASOS - 1) {
     btnSig.textContent = '✅ Empezar';
   } else if (paso === 2) {
-    // Paso WhatsApp: cambiar texto según estado
-    btnSig.textContent = conectado ? 'Siguiente →' : 'Conectar WhatsApp';
+    // Paso WhatsApp: reset UI si no está conectado
+    if (!conectado) {
+      $('btnOnboardingConectar').classList.remove('oculto');
+      $('onboardingQrCaja').classList.add('oculto');
+      $('onboardingQrEstado').textContent = 'Pulsa "Conectar WhatsApp" para empezar';
+      $('onboardingQrEstado').className = 'onboarding-estado esperando';
+      btnSig.textContent = 'Saltar este paso';
+    } else {
+      btnSig.textContent = 'Siguiente →';
+    }
   } else {
     btnSig.textContent = 'Siguiente →';
   }
@@ -1111,30 +1119,25 @@ async function completarOnboarding() {
   cerrarOnboarding();
 }
 
+// Botón conectar en el onboarding
+$('btnOnboardingConectar').addEventListener('click', async () => {
+  try {
+    await api.conectar();
+    $('onboardingQrEstado').textContent = 'Generando código QR…';
+    $('onboardingQrEstado').className = 'onboarding-estado esperando';
+    $('btnOnboardingConectar').classList.add('oculto');
+  } catch (err) {
+    $('onboardingQrEstado').textContent = 'Error al conectar: ' + err.message;
+    $('onboardingQrEstado').className = 'onboarding-estado error';
+  }
+});
+
 // Botón siguiente
 $('btnOnboardingSiguiente').addEventListener('click', async () => {
   const paso = onboardingPasoActual;
 
   if (paso === 2) {
-    // Paso WhatsApp: si no está conectado, iniciar conexión
-    if (!conectado) {
-      try {
-        await api.conectar();
-        log('Conectando WhatsApp… Escanea el código QR.', 'info');
-        // Esperar a que se conecte (máx 60s)
-        let intentos = 0;
-        while (!conectado && intentos < 120) {
-          await new Promise((r) => setTimeout(r, 500));
-          intentos++;
-        }
-        if (conectado) {
-          log('WhatsApp conectado.', 'ok');
-        }
-      } catch (err) {
-        log('Error al conectar WhatsApp: ' + err.message, 'error');
-      }
-    }
-    // Avanzar aunque no haya conectado (puede hacerlo después)
+    // Paso WhatsApp: avanzar aunque no haya conectado (puede hacerlo después)
     if (paso < TOTAL_ONBOARDING_PASOS - 1) {
       mostrarPasoOnboarding(paso + 1);
     }
@@ -1188,25 +1191,55 @@ $('onboardingCitas').addEventListener('input', () => {
   prev.className = 'pegar-preview ' + (incompletas ? 'error' : 'ok');
 });
 
+function actualizarEstadoOnboarding(estadoData) {
+  // Si estamos en el paso 2 del onboarding, actualizar el estado
+  if (!$('modalOnboarding').classList.contains('oculto') && onboardingPasoActual === 2) {
+    const estadoEl = $('onboardingQrEstado');
+    const btnConectar = $('btnOnboardingConectar');
+    const qrCaja = $('onboardingQrCaja');
+
+    if (estadoData === 'conectado') {
+      estadoEl.textContent = '✅ WhatsApp conectado';
+      estadoEl.className = 'onboarding-estado';
+      btnConectar.classList.add('oculto');
+    } else if (estadoData === 'conectando') {
+      // Se ha pulsado Conectar y el servidor está generando el QR
+      if (qrCaja.classList.contains('oculto')) {
+        estadoEl.textContent = 'Conectando… Espera el código QR';
+        estadoEl.className = 'onboarding-estado esperando';
+      }
+    } else if (estadoData === 'error') {
+      estadoEl.textContent = '❌ Error al conectar. Pulsa "Conectar WhatsApp" para reintentar.';
+      estadoEl.className = 'onboarding-estado error';
+      btnConectar.classList.remove('oculto');
+    }
+    // 'desconectado' no cambia nada si ya estamos en el proceso de conexión
+    // El QR se muestra cuando llega el evento 'qr' separado
+  }
+}
+
 // Escuchar estado de WhatsApp durante el paso 2 del onboarding
 function conectarEventos() {
   const es = new EventSource('/api/events');
   es.addEventListener('qr', (e) => {
-    $('qrImg').src = JSON.parse(e.data);
+    const qrData = JSON.parse(e.data);
+    $('qrImg').src = qrData;
     $('qrCaja').classList.remove('oculto');
     log('Código QR listo. Escanéalo con tu teléfono.', 'info');
+    // Si estamos en el onboarding paso 2, mostrar el QR ahí también
+    if (!$('modalOnboarding').classList.contains('oculto') && onboardingPasoActual === 2) {
+      $('onboardingQrImg').src = qrData;
+      $('onboardingQrCaja').classList.remove('oculto');
+      $('btnOnboardingConectar').classList.add('oculto');
+      const estadoEl = $('onboardingQrEstado');
+      estadoEl.textContent = '📱 Escanea el código QR con tu teléfono';
+      estadoEl.className = 'onboarding-estado esperando';
+    }
   });
   es.addEventListener('estado', (e) => {
-    setEstado(JSON.parse(e.data));
-    // Si estamos en el paso 2 del onboarding, actualizar el estado
-    if (!$('modalOnboarding').classList.contains('oculto') && onboardingPasoActual === 2) {
-      const estadoEl = $('onboardingQrEstado');
-      if (conectado) {
-        estadoEl.textContent = '✅ WhatsApp conectado';
-        estadoEl.className = 'onboarding-estado';
-        $('btnOnboardingSiguiente').textContent = 'Siguiente →';
-      }
-    }
+    const estadoData = JSON.parse(e.data);
+    setEstado(estadoData);
+    actualizarEstadoOnboarding(estadoData);
   });
   es.addEventListener('salud', (e) => pintarSalud(JSON.parse(e.data)));
   es.addEventListener('citas', (e) => {

@@ -263,7 +263,12 @@
         <h2>📱 Conecta tu WhatsApp</h2>
         <p>Para enviar recordatorios, la aplicación necesita conectarse a tu WhatsApp. Pulsa <b>Conectar WhatsApp</b> y escanea el código QR con tu móvil.</p>
         <p class="onboarding-instrucciones"><b>WhatsApp → Ajustes → Dispositivos vinculados → Vincular dispositivo</b></p>
-        <div id="onboardingQrEstado" class="onboarding-estado">Esperando conexión…</div>
+        <button id="btnOnboardingConectar" class="btn btn-verde">Conectar WhatsApp</button>
+        <div id="onboardingQrCaja" class="qr-caja oculto" style="margin-top:16px;">
+          <img id="onboardingQrImg" alt="Código QR" />
+          <p class="qr-nota">Escanea este código con tu teléfono</p>
+        </div>
+        <div id="onboardingQrEstado" class="onboarding-estado esperando">Esperando conexión…</div>
       </div>
 
       <!-- Paso 3: Importar citas -->
