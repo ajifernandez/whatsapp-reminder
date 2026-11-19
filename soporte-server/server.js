@@ -353,9 +353,9 @@ function historialHtml(c) {
 
 // Modal de historial (se inyecta en el HTML)
 function historialModal() {
-  return `<div id="modalHistorial" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
-<div class="card" style="max-width:480px;width:90%;max-height:80vh;overflow:auto;position:relative">
-<button onclick="this.closest('div[style]').style.display='none'" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-secondary)">✕</button>
+  return `<div id="modalHistorial" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center" onclick="this.style.display='none'">
+<div class="card" style="max-width:480px;width:90%;max-height:80vh;overflow:auto;position:relative" onclick="event.stopPropagation()">
+<button onclick="document.getElementById('modalHistorial').style.display='none'" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-secondary)">✕</button>
 <h2 style="margin:0 0 16px">📜 Historial de estados</h2>
 <div id="modalHistorialCuerpo"></div>
 </div></div>`;
