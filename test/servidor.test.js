@@ -288,24 +288,7 @@ const cita = (nombre, telefono, extra = {}) => ({ nombre, telefono, fecha: '2026
   ok('latido: al apagar con latidos en camino, el último en llegar siempre es «apagada» (3 vueltas)');
   receptor.kill(); await pausa(200); fs.rmSync(dirReceptor, { recursive: true, force: true });
 
-  // envio automatico: cita en las proximas horas con WhatsApp sin responder -> sin marcar y en pausa
-  s = await arrancar({ env: { INTERVALO_AUTO_MS: '200' } });
-  try {
-    await s.esperarEstado('conectado');
-    const dentro = new Date(Date.now() + 3 * 3600e3);
-    const dos = (n) => String(n).padStart(2, '0');
-    const fecha = `${dentro.getFullYear()}-${dos(dentro.getMonth() + 1)}-${dos(dentro.getDate())}`;
-    const hora = `${dos(dentro.getHours())}:${dos(dentro.getMinutes())}`;
-    await s.api('/api/citas', [cita('Auto', '612345888', { fecha, hora })]);
-    await s.api('/api/config', { autoEnvio: true });
-    await pausa(1500);
-    const g = (await s.api('/api/citas'))[0];
-    assert.equal(g.estadoEnvio, undefined, 'sin marcar');
-    const log = (await s.api('/api/diagnostico')).log;
-    assert.equal(log.filter((l) => l.includes('Envío automático en pausa')).length, 1, 'entra en pausa una sola vez, no cada 200 ms');
-    assert.equal(log.filter((l) => l.includes('WhatsApp no responde, no se pudo comprobar')).length, 1, 'no reintenta durante la pausa');
-    ok('envío automático: sin respuesta -> cita sin marcar y pausa (no reintenta en bucle)');
-  } finally { await s.cerrar(); }
+  // v3: envío automático eliminado (autoEnvio forzado a false). El test se ha quitado.
 
   s = await arrancar({ sesionWwebjs: true });
   try {
