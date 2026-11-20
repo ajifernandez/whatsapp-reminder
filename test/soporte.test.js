@@ -128,10 +128,16 @@ const dirsTemporales = [];
     ok('host y causa con HTML salen escapados');
 
     // --- no se mezclan con los diagnósticos
-    assert.match(await r.html('/diagnosticos'), /Diagnósticos recibidos/);
-    assert.match(await r.html('/diagnosticos'), /0 informes/);
-    assert.ok(!(await r.html('/diagnosticos')).includes('clinicas.json'));
-    ok('el estado de las clínicas no aparece en la lista de diagnósticos');
+    let diagPag = await r.html('/diagnosticos');
+    assert.match(diagPag, /Diagnósticos recibidos/);
+    assert.match(diagPag, /0 informes/);
+    assert.ok(!diagPag.includes('clinicas.json'));
+    assert.match(diagPag, /btnBorrarSel/, 'botón borrar seleccionados');
+    assert.match(diagPag, /btnSelTodo/, 'botón select all');
+    assert.match(diagPag, /btnDeselTodo/, 'botón deselect all');
+    assert.match(diagPag, /checkAllHeader/, 'checkbox en el header');
+    assert.match(diagPag, /colspan=6/, '6 columnas con checkbox');
+    ok('el estado de las clínicas no aparece en la lista de diagnósticos; UI de selección masiva presente');
 
     // --- pedir diagnóstico desde la web: la petición viaja en la respuesta del latido
     const pedir = (id, cab = {}) => r.pedir('/clinicas/' + id + '/diagnostico', { method: 'POST', headers: cab });
@@ -370,6 +376,82 @@ const dirsTemporales = [];
     assert.match(pagina, /riesgo alto/, 'memoria alta → riesgo alto');
     assert.match(pagina, /más de 2 GB de RAM/, 'alerta de memoria');
     ok('alerta proactiva por memoria alta');
+  } finally { await r.parar(); }
+
+  // --- borrado masivo de diagnósticos
+  r = await arrancar();
+  dirsTemporales.push(r.dir);
+  try {
+    // crear algunos diagnósticos
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await fetch(r.base + '/diagnostico', {
+        method: 'POST',
+        body: JSON.stringify({ version: '2.5.0', estado: 'conectado', log: [], host: `HOST-${i}` })
+      })).status, 200);
+    }
+    let diagPag = await r.html('/diagnosticos');
+    assert.match(diagPag, /3 informes/, '3 diagnósticos creados');
+    assert.match(diagPag, /diag-check/, 'checkboxes presentes');
+
+    // endpoint requiere autenticación
+    assert.equal((await fetch(r.base + '/api/borrar-diagnosticos', {
+      method: 'POST',
+      body: JSON.stringify({ nombres: ['x.json'] })
+    })).status, 401, 'sin contraseña → 401');
+
+    // formato inválido
+    assert.equal((await r.pedir('/api/borrar-diagnosticos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: r.base },
+      body: JSON.stringify({ nombres: 'no es array' })
+    })).status, 400, 'formato inválido → 400');
+
+    // borrar 2 de 3
+    const archivos = fs.readdirSync(r.dir).filter((n) => n.endsWith('.json'));
+    const borrar = archivos.slice(0, 2);
+    const resp = await r.pedir('/api/borrar-diagnosticos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: r.base },
+      body: JSON.stringify({ nombres: borrar })
+    });
+    assert.equal(resp.status, 200);
+    const texto = await resp.text();
+    assert.match(texto, /2 borrados/, 'respuesta indica 2 borrados');
+
+    // verificar que queda 1
+    diagPag = await r.html('/diagnosticos');
+    assert.match(diagPag, /1 informe/, 'queda 1 diagnóstico');
+
+    // borrar el último
+    const restante = fs.readdirSync(r.dir).filter((n) => n.endsWith('.json'));
+    const resp2 = await r.pedir('/api/borrar-diagnosticos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: r.base },
+      body: JSON.stringify({ nombres: restante })
+    });
+    assert.equal(resp2.status, 200);
+    diagPag = await r.html('/diagnosticos');
+    assert.match(diagPag, /0 informes/, 'todos borrados');
+
+    // borrar archivos que no existen no falla
+    const resp3 = await r.pedir('/api/borrar-diagnosticos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: r.base },
+      body: JSON.stringify({ nombres: ['no-existe.json'] })
+    });
+    assert.equal(resp3.status, 200);
+    assert.match(await resp3.text(), /0 borrados/);
+
+    // protección contra path traversal
+    const resp4 = await r.pedir('/api/borrar-diagnosticos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: r.base },
+      body: JSON.stringify({ nombres: ['../../../etc/passwd'] })
+    });
+    assert.equal(resp4.status, 200);
+    assert.match(await resp4.text(), /0 borrados/, 'path traversal ignorado');
+
+    ok('borrado masivo: autenticación, formato, borra seleccionados, ignora inexistentes y path traversal');
   } finally { await r.parar(); }
 
   for (const d of dirsTemporales) fs.rmSync(d, { recursive: true, force: true });

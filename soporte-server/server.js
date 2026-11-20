@@ -167,14 +167,66 @@ function paginaListado() {
     try { d = JSON.parse(fs.readFileSync(path.join(DATA_DIR, n), 'utf8')); } catch (_) { /* fichero ilegible */ }
     const fecha = fs.statSync(path.join(DATA_DIR, n)).mtime.toLocaleString('es-ES', { timeZone: ZONA });
     const u = encodeURIComponent(n);
-    return `<tr><td>${esc(d.host)}<br><small>${esc(d._ip)}</small></td><td>${esc(fecha)}</td><td>${esc(d.version)}</td>`
-      + `<td>${esc(d.estado)}${d.ultimoError ? `<br><small>${esc(String(d.ultimoError).slice(0, 80))}</small>` : ''}</td>`
-      + `<td><a href="/f/${u}" class="accion">ver</a> · <a href="/f/${u}?d=1" class="accion">descargar</a> · <a href="#" data-borrar="${esc(n)}" class="accion" style="color:var(--danger-text)">borrar</a></td></tr>`;
+    return `<tr>
+      <td><input type="checkbox" class="diag-check" value="${esc(n)}"></td>
+      <td>${esc(d.host)}<br><small>${esc(d._ip)}</small></td>
+      <td>${esc(fecha)}</td>
+      <td>${esc(d.version)}</td>
+      <td>${esc(d.estado)}${d.ultimoError ? `<br><small>${esc(String(d.ultimoError).slice(0, 80))}</small>` : ''}</td>
+      <td><a href="/f/${u}" class="accion">ver</a> · <a href="/f/${u}?d=1" class="accion">descargar</a> · <a href="#" data-borrar="${esc(n)}" class="accion" style="color:var(--danger-text)">borrar</a></td>
+    </tr>`;
   });
   return plantilla('Diagnósticos', 'diagnosticos', `<h1>📋 Diagnósticos recibidos</h1>
-<div class="resumen"><span class="chip" style="background:var(--info-bg);color:var(--info-text)">${todos.length} informes</span><span class="chip" style="background:var(--gray-bg);color:var(--gray)">${kb} KB</span></div>
-<table><thead><tr><th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${filas.join('') || '<tr><td colspan=5 style="text-align:center;padding:24px;color:var(--text-secondary)">Sin informes todavía</td></tr>'}</tbody></table>`, `
+<div class="resumen"><span class="chip" style="background:var(--info-bg);color:var(--info-text)">${todos.length} informes</span><span class="chip" style="background:var(--gray-bg);color:var(--gray)">${kb} KB</span>
+<button id="btnBorrarSel" class="btn btn-danger" style="margin-left:auto;display:none" disabled>🗑️ Borrar seleccionados (<span id="selCount">0</span>)</button>
+<button id="btnSelTodo" class="btn btn-secondary" style="margin-left:8px">Select All</button>
+<button id="btnDeselTodo" class="btn btn-secondary" style="margin-left:4px">Deselect All</button></div>
+<table><thead><tr>
+  <th><input type="checkbox" id="checkAllHeader" title="Seleccionar todo"></th>
+  <th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th>Acciones</th>
+</tr></thead><tbody>${filas.join('') || '<tr><td colspan=6 style="text-align:center;padding:24px;color:var(--text-secondary)">Sin informes todavía</td></tr>'}</tbody></table>`, `
 <script>
+const checks = () => document.querySelectorAll('.diag-check');
+const selCount = document.getElementById('selCount');
+const btnBorrar = document.getElementById('btnBorrarSel');
+const btnSelTodo = document.getElementById('btnSelTodo');
+const btnDeselTodo = document.getElementById('btnDeselTodo');
+const checkAllHeader = document.getElementById('checkAllHeader');
+
+function actualizarContador() {
+  const arr = checks();
+  const sel = [...arr].filter(c => c.checked).length;
+  selCount.textContent = sel;
+  btnBorrar.style.display = sel ? '' : 'none';
+  btnBorrar.disabled = sel === 0;
+  checkAllHeader.checked = arr.length > 0 && sel === arr.length;
+  checkAllHeader.indeterminate = sel > 0 && sel < arr.length;
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target.classList.contains('diag-check')) actualizarContador();
+  if (e.target.id === 'checkAllHeader') {
+    const val = e.target.checked;
+    checks().forEach(c => c.checked = val);
+    actualizarContador();
+  }
+});
+
+btnSelTodo.addEventListener('click', () => { checks().forEach(c => c.checked = true); actualizarContador(); });
+btnDeselTodo.addEventListener('click', () => { checks().forEach(c => c.checked = false); actualizarContador(); });
+
+btnBorrar.addEventListener('click', async () => {
+  const nombres = [...checks()].filter(c => c.checked).map(c => c.value);
+  if (!nombres.length) return;
+  if (!confirm('¿Borrar ' + nombres.length + ' diagnóstico(s)? No se puede deshacer.')) return;
+  const r = await fetch('/api/borrar-diagnosticos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nombres })
+  });
+  if (r.ok) location.reload(); else alert('No se pudo borrar (' + r.status + ')');
+});
+
 document.addEventListener('click', async (e) => {
   const n = e.target.dataset && e.target.dataset.borrar;
   if (!n) return;
@@ -619,6 +671,25 @@ http.createServer((req, res) => {
     fs.rmSync(ruta);
     console.log('borrado', path.basename(ruta));
     return responder(res, 200, 'ok');
+  }
+  // Borrado masivo de diagnosticos
+  if (req.method === 'POST' && url.pathname === '/api/borrar-diagnosticos') {
+    if (!origenPropio(req)) return responder(res, 403, 'origen no permitido');
+    if (!autorizar(req, res)) return;
+    return leerJson(req, res, 65536, (d) => {
+      if (!Array.isArray(d.nombres)) return responder(res, 400, 'formato invalido');
+      let borrados = 0;
+      for (const n of d.nombres) {
+        const ruta = path.join(DATA_DIR, path.basename(String(n)));
+        if (fs.existsSync(ruta) && /^[\w.-]+\.json$/.test(path.basename(ruta))) {
+          fs.rmSync(ruta);
+          borrados++;
+          console.log('borrado masivo', path.basename(ruta));
+        }
+      }
+      podar();
+      responder(res, 200, `${borrados} borrados`);
+    });
   }
   if (req.method !== 'POST' || url.pathname !== '/diagnostico') return responder(res, 404, 'no');
 
