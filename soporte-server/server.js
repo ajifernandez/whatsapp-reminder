@@ -607,7 +607,11 @@ function abrirHorario(id) {
   // Cargar el horario actual desde la tabla (se pasa por data attribute)
   const btn = document.querySelector('[data-horario="' + id + '"]');
   const horarioJson = btn ? btn.dataset.horarioJson : null;
-  const horario = horarioJson ? JSON.parse(horarioJson) : Array(7).fill(null).map(() => ({abierto:true,desde:'09:00',hasta:'14:00'}));
+  let horario = Array(7).fill(null).map(() => ({abierto:true,desde:'09:00',hasta:'14:00'}));
+  if (horarioJson) {
+    const parsed = JSON.parse(horarioJson);
+    if (Array.isArray(parsed)) horario = parsed;
+  }
   // Index 0=Domingo, pero la UI muestra Lunes primero. Reordenamos: [1,2,3,4,5,6,0]
   const orden = [1,2,3,4,5,6,0];
   orden.forEach((idxDia, iFila) => {
