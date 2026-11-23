@@ -135,6 +135,11 @@ a.accion:hover{color:var(--primary-hover);text-decoration:underline}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600}
 .fade-in{animation:fadeIn .3s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.horario-fila{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--gray-bg)}
+.horario-dia{min-width:80px;font-weight:500;font-size:13px}
+.horario-check{width:18px;height:18px;cursor:pointer;accent-color:var(--primary)}
+.horario-desde,.horario-hasta{width:90px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:inherit}
+.horario-desde:disabled,.horario-hasta:disabled{opacity:.4;cursor:not-allowed}
 @media(max-width:768px){
 .container{padding:12px}
 header{padding:12px 16px}
@@ -277,28 +282,59 @@ const HORA_MS = 3600e3;
 const bucketDe = (estado) => ({ conectado: 'ok', degradado: 'warning', conectando: 'conectando', apagada: 'apagada' }[estado] || 'desconectado');
 const diaDe = (t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: ZONA }); // AAAA-MM-DD en la zona de soporte
 
-// Horario de la clinica (hora de ZONA): fuera de el no cuenta, ni como disponible ni como caida
-const HORA_INI = process.env.HORA_INI !== undefined ? Number(process.env.HORA_INI) : 8; // HORA_INI/HORA_FIN: solo para pruebas
+// Horario por defecto para clinicas sin horario configurado (hora de ZONA)
+const HORA_INI = process.env.HORA_INI !== undefined ? Number(process.env.HORA_INI) : 8;
 const HORA_FIN = process.env.HORA_FIN !== undefined ? Number(process.env.HORA_FIN) : 21;
 const horaDe = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: ZONA, hour: 'numeric', hourCycle: 'h23' }).format(t));
 
+// Horario individual por clínica: array de 7 elementos (domingo=0, sábado=6)
+// Cada elemento: { abierto: boolean, desde: "HH:MM", hasta: "HH:MM" }
+// Si no tiene horario configurado, usa HORA_INI/HORA_FIN los 7 días
+function horarioDeClinica(c) {
+  if (Array.isArray(c.horario) && c.horario.length === 7) return c.horario;
+  // Horario por defecto: todos los días HORA_INI-HORA_FIN
+  return Array(7).fill(null).map(() => ({ abierto: true, desde: String(HORA_INI).padStart(2, '0') + ':00', hasta: String(HORA_FIN).padStart(2, '0') + ':00' }));
+}
+
+// Devuelve true si el timestamp cae dentro del horario de la clínica
+function dentroHorario(c, t) {
+  const horario = horarioDeClinica(c);
+  const diaSemana = new Date(t).getDay(); // 0=domingo, 1=lunes, ...
+  const h = horario[diaSemana];
+  if (!h || !h.abierto) return false;
+  const hHora = horaDe(t);
+  const [desdeH, desdeM] = h.desde.split(':').map(Number);
+  const [hastaH, hastaM] = h.hasta.split(':').map(Number);
+  const desdeMin = desdeH * 60 + desdeM;
+  const hastaMin = hastaH * 60 + hastaM;
+  const minutoActual = hHora * 60;
+  return minutoActual >= desdeMin && minutoActual < hastaMin;
+}
+
 // Suma [desde, hasta) a dias[dia][bucket], troceando por horas para no pasarse de dia
-function repartir(dias, desde, hasta, bucket) {
+// Usa el horario de la clínica si se proporciona, sino usa HORA_INI/HORA_FIN globales
+function repartir(dias, desde, hasta, bucket, clinica) {
   for (let a = desde; a < hasta;) {
     const fin = Math.min(hasta, (Math.floor(a / HORA_MS) + 1) * HORA_MS);
-    const h = horaDe(a);
-    if (h >= HORA_INI && h < HORA_FIN) {
+    let dentro = false;
+    if (clinica) {
+      dentro = dentroHorario(clinica, a);
+    } else {
+      const h = horaDe(a);
+      dentro = h >= HORA_INI && h < HORA_FIN;
+    }
+    if (dentro) {
       const d = (dias[diaDe(a)] ||= {});
       d[bucket] = (d[bucket] || 0) + (fin - a);
     }
     a = fin;
   }
 }
-function acumular(dias, estado, desde, hasta) {
+function acumular(dias, estado, desde, hasta, clinica) {
   if (!(hasta > desde) || hasta - desde > DIAS_GUARDADOS * 24 * HORA_MS) return;
   const cubierto = Math.min(hasta - desde, OFFLINE_MS);
-  repartir(dias, desde, desde + cubierto, bucketDe(estado));
-  if (hasta - desde > cubierto) repartir(dias, desde + cubierto, hasta, estado === 'apagada' ? 'apagada' : 'offline');
+  repartir(dias, desde, desde + cubierto, bucketDe(estado), clinica);
+  if (hasta - desde > cubierto) repartir(dias, desde + cubierto, hasta, estado === 'apagada' ? 'apagada' : 'offline', clinica);
 }
 function podarDias(dias) {
   for (const d of Object.keys(dias).sort().slice(0, -DIAS_GUARDADOS)) delete dias[d];
@@ -322,7 +358,7 @@ const ETIQUETA_ESTADO = { ok: 'conectada', warning: 'con problemas', desconectad
 // Los ultimos 14 dias como casillas de color, cada una muestra el estado predominante
 function graficaDias(c, ahora) {
   const dias = JSON.parse(JSON.stringify(c.dias || {}));
-  if (c.ultimo) acumular(dias, c.estado, c.ultimo, ahora); // el tramo abierto hasta este momento
+  if (c.ultimo) acumular(dias, c.estado, c.ultimo, ahora, c); // el tramo abierto hasta este momento
   const casillas = [];
   let diasConectados = 0, diasConDatos = 0;
   for (let i = 13; i >= 0; i--) {
@@ -366,12 +402,22 @@ function validarLatido(d) {
 // Calcula un nivel de riesgo (alto/medio/bajo) para cada clínica basado en múltiples factores.
 // Se actualiza en tiempo real con cada latido.
 const RIESGO_ORDEN = { alto: 0, medio: 1, bajo: 2 };
+
+// Devuelve true si la clínica debería estar operativa ahora según su horario
+function deberiaEstarAbierto(c, ahora) {
+  const horario = horarioDeClinica(c);
+  const diaSemana = new Date(ahora).getDay();
+  return horario[diaSemana] && horario[diaSemana].abierto;
+}
+
 function calcularRiesgo(c, ahora) {
   const sinSenal = ahora - c.ultimo;
+  const estaEnHorario = deberiaEstarAbierto(c, ahora);
   // Alto: desconectado >2h, sin señal, en nube, o memoria muy alta
   if (c.enNube) return 'alto';
-  if (sinSenal > OFFLINE_MS && c.estado !== 'apagada') return 'alto';
-  if ((c.estado === 'desconectado' || c.estado === 'error') && sinSenal > 2 * 3600e3) return 'alto';
+  // Si la clínica no debería estar abierta ahora, no es riesgo por no dar latidos
+  if (sinSenal > OFFLINE_MS && c.estado !== 'apagada' && estaEnHorario) return 'alto';
+  if ((c.estado === 'desconectado' || c.estado === 'error') && sinSenal > 2 * 3600e3 && estaEnHorario) return 'alto';
   if (c.memMB != null && c.memMB > 2000) return 'alto'; // >2GB RAM
   // Medio: degradado, conectando >10min, versión desactualizada, canal main
   if (c.estado === 'degradado') return 'medio';
@@ -390,7 +436,7 @@ function registrarLatido(l, ip) {
     c = clinicas[l.id] = { id: l.id, alias: null, primero: ahora, cambios: [] };
   }
   const esNueva = !c.ultimo; // primer latido: no hay estado anterior real que comparar
-  if (!esNueva) { c.dias ||= {}; acumular(c.dias, c.estado, c.ultimo, ahora); podarDias(c.dias); }
+  if (!esNueva) { c.dias ||= {}; acumular(c.dias, c.estado, c.ultimo, ahora, c); podarDias(c.dias); }
   const cambio = c.estado !== l.estado;
   Object.assign(c, l, { ip, ultimo: ahora });
   if (cambio) {
@@ -441,6 +487,31 @@ function historialCuerpoHtml(c) {
   return `<div style="padding:0 4px">${lineas}</div>`;
 }
 
+// Modal de edición de horario por clínica
+function horarioModal() {
+  const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+  const filas = dias.map((nombre, i) => {
+    return `<div class="horario-fila">
+<label class="horario-dia">${esc(nombre)}</label>
+<input type="checkbox" class="horario-check" data-dia="${i}">
+<input type="time" class="horario-desde" data-dia="${i}" value="09:00">
+<span>–</span>
+<input type="time" class="horario-hasta" data-dia="${i}" value="14:00">
+</div>`;
+  }).join('');
+  return `<div id="modalHorario" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center" onclick="this.style.display='none'">
+<div class="card" style="max-width:420px;width:90%;max-height:80vh;overflow:auto;position:relative" onclick="event.stopPropagation()">
+<button onclick="document.getElementById('modalHorario').style.display='none'" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-secondary)">✕</button>
+<h2 style="margin:0 0 4px">🕐 Horario de la clínica</h2>
+<p style="margin:0 0 16px;font-size:12px;color:var(--text-secondary)">Los días/horas fuera del horario no cuentan para riesgo ni disponibilidad.</p>
+<div id="horarioFilas" style="display:flex;flex-direction:column;gap:8px">${filas}</div>
+<div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+<button class="btn btn-secondary" onclick="document.getElementById('modalHorario').style.display='none'">Cancelar</button>
+<button id="btnGuardarHorario" class="btn btn-primary">Guardar</button>
+</div>
+</div></div>`;
+}
+
 // Alertas proactivas: problemas que requieren atención inmediata
 function alertasProactivas() {
   const ahora = Date.now();
@@ -485,6 +556,7 @@ function contenidoClinicas() {
 <td><span class="chip riesgo-${riesgo}">riesgo ${esc(riesgo)}</span></td>
 <td><b>${esc(c.alias || c.host || 'sin nombre')}</b>${c.alias ? `<br><small>${esc(c.host)}</small>` : ''}<br><small title="${esc(c.id)}">${esc(c.id.slice(0, 8))}</small>
 <a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}" style="color:var(--danger-text)">olvidar</a>
+<a href="#" class="accion" data-horario="${esc(c.id)}" data-horario-json="${esc(JSON.stringify(c.horario || null))}">🕐 Horario</a>
 ${diagnosticoHtml(c, v, ahora)}</td>
 <td>${esc(detalle(c, v, ahora))}${tecnicoHtml}</td>
 <td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
@@ -506,7 +578,8 @@ function paginaClinicas() {
 <small id="actualizado">🔄 Se actualiza sola cada ${REFRESCO_S} s.</small>
 <small style="color:var(--text-secondary)">Última actualización: <span id="ultimaHora">—</span></small>
 </div>
-${historialModal()}`, `
+${historialModal()}
+${horarioModal()}`, `
 <script>
 function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function abrirHistorial(id) {
@@ -528,9 +601,40 @@ function abrirHistorial(id) {
       modal.style.display = 'flex';
     });
 }
+let horarioClinicaId = null;
+function abrirHorario(id) {
+  horarioClinicaId = id;
+  // Cargar el horario actual desde la tabla (se pasa por data attribute)
+  const btn = document.querySelector('[data-horario="' + id + '"]');
+  const horarioJson = btn ? btn.dataset.horarioJson : null;
+  const horario = horarioJson ? JSON.parse(horarioJson) : Array(7).fill(null).map(() => ({abierto:true,desde:'09:00',hasta:'14:00'}));
+  // Index 0=Domingo, pero la UI muestra Lunes primero. Reordenamos: [1,2,3,4,5,6,0]
+  const orden = [1,2,3,4,5,6,0];
+  orden.forEach((idxDia, iFila) => {
+    const h = horario[idxDia] || {abierto:true,desde:'09:00',hasta:'14:00'};
+    const check = document.querySelector('.horario-check[data-dia="' + iFila + '"]');
+    const desde = document.querySelector('.horario-desde[data-dia="' + iFila + '"]');
+    const hasta = document.querySelector('.horario-hasta[data-dia="' + iFila + '"]');
+    if (check) check.checked = h.abierto;
+    if (desde) { desde.value = h.desde; desde.disabled = !h.abierto; }
+    if (hasta) { hasta.value = h.hasta; hasta.disabled = !h.abierto; }
+  });
+  // Toggle de checkbox: habilita/deshabilita los campos de hora
+  document.querySelectorAll('.horario-check').forEach(check => {
+    check.onchange = () => {
+      const dia = check.dataset.dia;
+      const desde = document.querySelector('.horario-desde[data-dia="' + dia + '"]');
+      const hasta = document.querySelector('.horario-hasta[data-dia="' + dia + '"]');
+      desde.disabled = !check.checked;
+      hasta.disabled = !check.checked;
+    };
+  });
+  document.getElementById('modalHorario').style.display = 'flex';
+}
 document.addEventListener('click', async (e) => {
   const d = e.target.dataset || {};
   if (d.historial) { e.preventDefault(); abrirHistorial(d.historial); return; }
+  if (d.horario) { e.preventDefault(); abrirHorario(d.horario); return; }
   if (!d.renombrar && !d.olvidar && !d.pedir) return;
   e.preventDefault();
   let r;
@@ -566,6 +670,34 @@ async function refrescar() {
     if (++fallos >= 2) document.getElementById('actualizado').textContent = '⚠️ No se puede contactar con el servidor de soporte. Se sigue intentando...';
   }
 }
+document.getElementById('btnGuardarHorario').addEventListener('click', async () => {
+  // La UI muestra filas 0-6 como Lun-Dom. El horario interno es [Dom,Lun,...,Sáb]
+  const orden = [1,2,3,4,5,6,0]; // fila 0=Lunes=día 1, fila 6=Dom=día 0
+  const horario = Array(7);
+  for (let i = 0; i < 7; i++) {
+    const idxDia = orden[i];
+    const check = document.querySelector('.horario-check[data-dia="' + i + '"]');
+    const desde = document.querySelector('.horario-desde[data-dia="' + i + '"]');
+    const hasta = document.querySelector('.horario-hasta[data-dia="' + i + '"]');
+    horario[idxDia] = {
+      abierto: check.checked,
+      desde: desde.value || '09:00',
+      hasta: hasta.value || '14:00'
+    };
+  }
+  const r = await fetch('/clinicas/' + horarioClinicaId + '/horario', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ horario })
+  });
+  if (r.ok) {
+    document.getElementById('modalHorario').style.display = 'none';
+    refrescar();
+  } else {
+    alert('No se pudo guardar (' + r.status + ')');
+  }
+});
+
 setInterval(refrescar, ${REFRESCO_S * 1000});
 document.addEventListener('visibilitychange', refrescar);
 </script>`);
@@ -637,6 +769,28 @@ http.createServer((req, res) => {
     if (!c.orden || Date.now() - c.orden.t >= ORDEN_MAX_MS) c.orden = { id: Date.now(), t: Date.now() }; // una pendiente basta
     guardarClinicas();
     return responder(res, 200, 'ok');
+  }
+  // Guardar horario de una clínica
+  const mh = req.method === 'POST' && url.pathname.match(/^\/clinicas\/([a-f0-9-]{16,40})\/horario$/);
+  if (mh) {
+    if (!origenPropio(req)) return responder(res, 403, 'origen no permitido');
+    if (!autorizar(req, res)) return;
+    const c = clinicas[mh[1]];
+    if (!c) return responder(res, 404, 'no');
+    return leerJson(req, res, 2048, (d) => {
+      // Validar: array de 7 elementos, cada uno {abierto, desde, hasta}
+      if (!Array.isArray(d.horario) || d.horario.length !== 7) return responder(res, 400, 'formato invalido');
+      const horario = d.horario.map((h, i) => {
+        if (!h || typeof h.abierto !== 'boolean') return { abierto: false, desde: '09:00', hasta: '14:00' };
+        const desde = String(h.desde || '09:00').slice(0, 5);
+        const hasta = String(h.hasta || '14:00').slice(0, 5);
+        if (!/^\d{2}:\d{2}$/.test(desde) || !/^\d{2}:\d{2}$/.test(hasta)) return { abierto: h.abierto, desde: '09:00', hasta: '14:00' };
+        return { abierto: h.abierto, desde, hasta };
+      });
+      c.horario = horario;
+      guardarClinicas();
+      responder(res, 200, 'ok');
+    });
   }
   const mc = (req.method === 'POST' || req.method === 'DELETE') && url.pathname.match(/^\/clinicas\/([a-f0-9-]{16,40})$/);
   if (mc) {
