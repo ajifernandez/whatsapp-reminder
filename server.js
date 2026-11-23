@@ -650,6 +650,13 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'renderer')));
 
+// Favicon para evitar 404 en consola del navegador
+app.get('/favicon.ico', (req, res) => {
+  const ico = Buffer.from('PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHRleHQgeT0iMjgiIGZvbnQtc2l6ZT0iMjgiPvCfjIw8L3RleHQ+PC9zdmc+', 'base64');
+  res.set({ 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
+  res.send(ico);
+});
+
 // Librerías para importar PDF/imagen, servidas en local (sin depender de internet)
 app.use('/vendor/pdfjs', express.static(path.join(__dirname, 'node_modules', 'pdfjs-dist', 'build')));
 app.use('/vendor/tesseract', express.static(path.join(__dirname, 'node_modules', 'tesseract.js', 'dist')));

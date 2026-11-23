@@ -135,11 +135,15 @@ a.accion:hover{color:var(--primary-hover);text-decoration:underline}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600}
 .fade-in{animation:fadeIn .3s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.horario-fila{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--gray-bg)}
-.horario-dia{min-width:80px;font-weight:500;font-size:13px}
+.horario-dia-bloque{padding:8px;border-radius:6px;background:var(--gray-bg);margin-bottom:4px}
+.horario-dia-cabecera{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.horario-dia-nombre{min-width:80px;font-weight:500;font-size:13px}
 .horario-check{width:18px;height:18px;cursor:pointer;accent-color:var(--primary)}
+.horario-rango-fila{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.horario-rango-check{width:14px;height:14px;cursor:pointer;accent-color:var(--info)}
 .horario-desde,.horario-hasta{width:90px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:inherit}
 .horario-desde:disabled,.horario-hasta:disabled{opacity:.4;cursor:not-allowed}
+.horario-rango-label{font-size:11px;color:var(--text-secondary);min-width:20px}
 @media(max-width:768px){
 .container{padding:12px}
 header{padding:12px 16px}
@@ -154,8 +158,9 @@ table{display:block;overflow-x:auto}
 }`;
 
 function plantilla(titulo, activa, cuerpo, extra = '') {
+  const favicon = '<link rel="icon" href="data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="28" font-size="28">📊</text></svg>') + '">';
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(titulo)}</title><style>${ESTILO}</style>
+${favicon}<title>${esc(titulo)}</title><style>${ESTILO}</style>
 <header class="container">
 <h1>📊 Panel de Soporte</h1>
 <p>Monitor de clínicas · WhatsApp Reminder</p>
@@ -288,27 +293,42 @@ const HORA_FIN = process.env.HORA_FIN !== undefined ? Number(process.env.HORA_FI
 const horaDe = (t) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: ZONA, hour: 'numeric', hourCycle: 'h23' }).format(t));
 
 // Horario individual por clínica: array de 7 elementos (domingo=0, sábado=6)
-// Cada elemento: { abierto: boolean, desde: "HH:MM", hasta: "HH:MM" }
-// Si no tiene horario configurado, usa HORA_INI/HORA_FIN los 7 días
+// Cada elemento: { abierto: boolean, rangos: [{desde: "HH:MM", hasta: "HH:MM"}, ...] }
+// Soporta hasta 2 rangos por día (mañana y tarde).
+// Si no tiene horario configurado, usa HORA_INI/HORA_FIN los 7 días.
 function horarioDeClinica(c) {
-  if (Array.isArray(c.horario) && c.horario.length === 7) return c.horario;
+  if (Array.isArray(c.horario) && c.horario.length === 7) {
+    // Migración: si un día tiene {abierto, desde, hasta} (formato antiguo), convertir a rangos
+    return c.horario.map((d) => {
+      if (d && Array.isArray(d.rangos)) return d;
+      // Formato antiguo o sin rangos: convertir
+      if (d && d.abierto && d.desde && d.hasta) {
+        return { abierto: true, rangos: [{ desde: d.desde, hasta: d.hasta }] };
+      }
+      return { abierto: false, rangos: [] };
+    });
+  }
   // Horario por defecto: todos los días HORA_INI-HORA_FIN
-  return Array(7).fill(null).map(() => ({ abierto: true, desde: String(HORA_INI).padStart(2, '0') + ':00', hasta: String(HORA_FIN).padStart(2, '0') + ':00' }));
+  const def = { abierto: true, rangos: [{ desde: String(HORA_INI).padStart(2, '0') + ':00', hasta: String(HORA_FIN).padStart(2, '0') + ':00' }] };
+  return Array(7).fill(null).map(() => ({ ...def, rangos: [...def.rangos] }));
 }
 
-// Devuelve true si el timestamp cae dentro del horario de la clínica
+// Devuelve true si el timestamp cae dentro de algun rango del horario de la clínica
 function dentroHorario(c, t) {
   const horario = horarioDeClinica(c);
   const diaSemana = new Date(t).getDay(); // 0=domingo, 1=lunes, ...
   const h = horario[diaSemana];
-  if (!h || !h.abierto) return false;
+  if (!h || !h.abierto || !h.rangos || !h.rangos.length) return false;
   const hHora = horaDe(t);
-  const [desdeH, desdeM] = h.desde.split(':').map(Number);
-  const [hastaH, hastaM] = h.hasta.split(':').map(Number);
-  const desdeMin = desdeH * 60 + desdeM;
-  const hastaMin = hastaH * 60 + hastaM;
   const minutoActual = hHora * 60;
-  return minutoActual >= desdeMin && minutoActual < hastaMin;
+  for (const r of h.rangos) {
+    const [desdeH, desdeM] = r.desde.split(':').map(Number);
+    const [hastaH, hastaM] = r.hasta.split(':').map(Number);
+    const desdeMin = desdeH * 60 + desdeM;
+    const hastaMin = hastaH * 60 + hastaM;
+    if (minutoActual >= desdeMin && minutoActual < hastaMin) return true;
+  }
+  return false;
 }
 
 // Suma [desde, hasta) a dias[dia][bucket], troceando por horas para no pasarse de dia
@@ -407,7 +427,8 @@ const RIESGO_ORDEN = { alto: 0, medio: 1, bajo: 2 };
 function deberiaEstarAbierto(c, ahora) {
   const horario = horarioDeClinica(c);
   const diaSemana = new Date(ahora).getDay();
-  return horario[diaSemana] && horario[diaSemana].abierto;
+  const h = horario[diaSemana];
+  return h && h.abierto && h.rangos && h.rangos.length > 0;
 }
 
 function calcularRiesgo(c, ahora) {
@@ -487,24 +508,38 @@ function historialCuerpoHtml(c) {
   return `<div style="padding:0 4px">${lineas}</div>`;
 }
 
-// Modal de edición de horario por clínica
+// Modal de edición de horario por clínica — 2 rangos por día (mañana y tarde)
 function horarioModal() {
-  const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-  const filas = dias.map((nombre, i) => {
-    return `<div class="horario-fila">
-<label class="horario-dia">${esc(nombre)}</label>
-<input type="checkbox" class="horario-check" data-dia="${i}">
-<input type="time" class="horario-desde" data-dia="${i}" value="09:00">
+  // La UI muestra Lunes primero: filas 0-6 = Lun-Dom. Internamente día 0=Dom, 1=Lun, ...
+  const diasUI = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const filas = diasUI.map((nombre, iFila) => {
+    return `<div class="horario-dia-bloque">
+<div class="horario-dia-cabecera">
+<label class="horario-dia-nombre">${esc(nombre)}</label>
+<input type="checkbox" class="horario-check" data-fila="${iFila}">
+</div>
+<div class="horario-rango-fila">
+<input type="checkbox" class="horario-rango-check" data-fila="${iFila}" data-rango="0">
+<span class="horario-rango-label">R1</span>
+<input type="time" class="horario-desde" data-fila="${iFila}" data-rango="0" value="09:00">
 <span>–</span>
-<input type="time" class="horario-hasta" data-dia="${i}" value="14:00">
+<input type="time" class="horario-hasta" data-fila="${iFila}" data-rango="0" value="14:00">
+</div>
+<div class="horario-rango-fila">
+<input type="checkbox" class="horario-rango-check" data-fila="${iFila}" data-rango="1">
+<span class="horario-rango-label">R2</span>
+<input type="time" class="horario-desde" data-fila="${iFila}" data-rango="1" value="16:00">
+<span>–</span>
+<input type="time" class="horario-hasta" data-fila="${iFila}" data-rango="1" value="20:00">
+</div>
 </div>`;
   }).join('');
   return `<div id="modalHorario" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center" onclick="this.style.display='none'">
-<div class="card" style="max-width:420px;width:90%;max-height:80vh;overflow:auto;position:relative" onclick="event.stopPropagation()">
+<div class="card" style="max-width:440px;width:90%;max-height:80vh;overflow:auto;position:relative" onclick="event.stopPropagation()">
 <button onclick="document.getElementById('modalHorario').style.display='none'" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-secondary)">✕</button>
 <h2 style="margin:0 0 4px">🕐 Horario de la clínica</h2>
-<p style="margin:0 0 16px;font-size:12px;color:var(--text-secondary)">Los días/horas fuera del horario no cuentan para riesgo ni disponibilidad.</p>
-<div id="horarioFilas" style="display:flex;flex-direction:column;gap:8px">${filas}</div>
+<p style="margin:0 0 16px;font-size:12px;color:var(--text-secondary)">Los días/horas fuera del horario no cuentan para riesgo ni disponibilidad. Activa R1 y/o R2 por día.</p>
+<div id="horarioFilas" style="display:flex;flex-direction:column;gap:4px">${filas}</div>
 <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
 <button class="btn btn-secondary" onclick="document.getElementById('modalHorario').style.display='none'">Cancelar</button>
 <button id="btnGuardarHorario" class="btn btn-primary">Guardar</button>
@@ -607,30 +642,58 @@ function abrirHorario(id) {
   // Cargar el horario actual desde la tabla (se pasa por data attribute)
   const btn = document.querySelector('[data-horario="' + id + '"]');
   const horarioJson = btn ? btn.dataset.horarioJson : null;
-  let horario = Array(7).fill(null).map(() => ({abierto:true,desde:'09:00',hasta:'14:00'}));
+  // Horario por defecto: todos los días abiertos con 1 rango
+  let horario = Array(7).fill(null).map(() => ({abierto:true,rangos:[{desde:'09:00',hasta:'14:00'}]}));
   if (horarioJson) {
     const parsed = JSON.parse(horarioJson);
     if (Array.isArray(parsed)) horario = parsed;
   }
-  // Index 0=Domingo, pero la UI muestra Lunes primero. Reordenamos: [1,2,3,4,5,6,0]
+  // Migrar formato antiguo {abierto, desde, hasta} -> {abierto, rangos: [...]}
+  horario = horario.map((d) => {
+    if (d && Array.isArray(d.rangos)) return d;
+    if (d && d.abierto && d.desde && d.hasta) return {abierto:true,rangos:[{desde:d.desde,hasta:d.hasta}]};
+    return {abierto:false,rangos:[]};
+  });
+  // La UI muestra filas 0-6 como Lun-Dom. Internamente día 0=Dom, 1=Lun, ...
   const orden = [1,2,3,4,5,6,0];
   orden.forEach((idxDia, iFila) => {
-    const h = horario[idxDia] || {abierto:true,desde:'09:00',hasta:'14:00'};
-    const check = document.querySelector('.horario-check[data-dia="' + iFila + '"]');
-    const desde = document.querySelector('.horario-desde[data-dia="' + iFila + '"]');
-    const hasta = document.querySelector('.horario-hasta[data-dia="' + iFila + '"]');
+    const h = horario[idxDia] || {abierto:true,rangos:[{desde:'09:00',hasta:'14:00'}]};
+    const check = document.querySelector('.horario-check[data-fila="' + iFila + '"]');
     if (check) check.checked = h.abierto;
-    if (desde) { desde.value = h.desde; desde.disabled = !h.abierto; }
-    if (hasta) { hasta.value = h.hasta; hasta.disabled = !h.abierto; }
+    // Rango 0 y 1
+    for (let r = 0; r < 2; r++) {
+      const rCheck = document.querySelector('.horario-rango-check[data-fila="' + iFila + '"][data-rango="' + r + '"]');
+      const desde = document.querySelector('.horario-desde[data-fila="' + iFila + '"][data-rango="' + r + '"]');
+      const hasta = document.querySelector('.horario-hasta[data-fila="' + iFila + '"][data-rango="' + r + '"]');
+      const rango = h.rangos[r];
+      if (rCheck) rCheck.checked = rango ? true : false;
+      if (desde) { desde.value = rango ? rango.desde : '09:00'; desde.disabled = !rango || !h.abierto; }
+      if (hasta) { hasta.value = rango ? rango.hasta : '14:00'; hasta.disabled = !rango || !h.abierto; }
+    }
   });
-  // Toggle de checkbox: habilita/deshabilita los campos de hora
+  // Toggle de checkbox del día: habilita/deshabilita todos los campos
   document.querySelectorAll('.horario-check').forEach(check => {
     check.onchange = () => {
-      const dia = check.dataset.dia;
-      const desde = document.querySelector('.horario-desde[data-dia="' + dia + '"]');
-      const hasta = document.querySelector('.horario-hasta[data-dia="' + dia + '"]');
-      desde.disabled = !check.checked;
-      hasta.disabled = !check.checked;
+      const fila = check.dataset.fila;
+      const deshabilitar = !check.checked;
+      for (let r = 0; r < 2; r++) {
+        const desde = document.querySelector('.horario-desde[data-fila="' + fila + '"][data-rango="' + r + '"]');
+        const hasta = document.querySelector('.horario-hasta[data-fila="' + fila + '"][data-rango="' + r + '"]');
+        if (desde) desde.disabled = deshabilitar;
+        if (hasta) hasta.disabled = deshabilitar;
+      }
+    };
+  });
+  // Toggle de checkbox de rango: habilita/deshabilita los campos de ese rango
+  document.querySelectorAll('.horario-rango-check').forEach(check => {
+    check.onchange = () => {
+      const fila = check.dataset.fila;
+      const rango = check.dataset.rango;
+      const desde = document.querySelector('.horario-desde[data-fila="' + fila + '"][data-rango="' + rango + '"]');
+      const hasta = document.querySelector('.horario-hasta[data-fila="' + fila + '"][data-rango="' + rango + '"]');
+      const deshabilitar = !check.checked;
+      if (desde) desde.disabled = deshabilitar;
+      if (hasta) hasta.disabled = deshabilitar;
     };
   });
   document.getElementById('modalHorario').style.display = 'flex';
@@ -680,13 +743,19 @@ document.getElementById('btnGuardarHorario').addEventListener('click', async () 
   const horario = Array(7);
   for (let i = 0; i < 7; i++) {
     const idxDia = orden[i];
-    const check = document.querySelector('.horario-check[data-dia="' + i + '"]');
-    const desde = document.querySelector('.horario-desde[data-dia="' + i + '"]');
-    const hasta = document.querySelector('.horario-hasta[data-dia="' + i + '"]');
+    const check = document.querySelector('.horario-check[data-fila="' + i + '"]');
+    const rangos = [];
+    for (let r = 0; r < 2; r++) {
+      const rCheck = document.querySelector('.horario-rango-check[data-fila="' + i + '"][data-rango="' + r + '"]');
+      const desde = document.querySelector('.horario-desde[data-fila="' + i + '"][data-rango="' + r + '"]');
+      const hasta = document.querySelector('.horario-hasta[data-fila="' + i + '"][data-rango="' + r + '"]');
+      if (rCheck && rCheck.checked) {
+        rangos.push({ desde: desde.value || '09:00', hasta: hasta.value || '14:00' });
+      }
+    }
     horario[idxDia] = {
       abierto: check.checked,
-      desde: desde.value || '09:00',
-      hasta: hasta.value || '14:00'
+      rangos
     };
   }
   const r = await fetch('/clinicas/' + horarioClinicaId + '/horario', {
@@ -730,6 +799,11 @@ function leerJson(req, res, max, alTerminar) {
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (req.method === 'GET' && url.pathname === '/favicon.ico') {
+    const ico = Buffer.from('PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHRleHQgeT0iMjgiIGZvbnQtc2l6ZT0iMjgiPvCfmpo8L3RleHQ+PC9zdmc+', 'base64');
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
+    return res.end(ico);
+  }
   if (req.method === 'GET' && url.pathname === '/health') return responder(res, 200, 'ok');
   if (req.method === 'GET' && url.pathname === '/') {
     if (!autorizar(req, res)) return;
@@ -782,14 +856,31 @@ http.createServer((req, res) => {
     const c = clinicas[mh[1]];
     if (!c) return responder(res, 404, 'no');
     return leerJson(req, res, 2048, (d) => {
-      // Validar: array de 7 elementos, cada uno {abierto, desde, hasta}
+      // Validar: array de 7 elementos, cada uno {abierto, rangos: [{desde, hasta}, ...]}
       if (!Array.isArray(d.horario) || d.horario.length !== 7) return responder(res, 400, 'formato invalido');
-      const horario = d.horario.map((h, i) => {
-        if (!h || typeof h.abierto !== 'boolean') return { abierto: false, desde: '09:00', hasta: '14:00' };
-        const desde = String(h.desde || '09:00').slice(0, 5);
-        const hasta = String(h.hasta || '14:00').slice(0, 5);
-        if (!/^\d{2}:\d{2}$/.test(desde) || !/^\d{2}:\d{2}$/.test(hasta)) return { abierto: h.abierto, desde: '09:00', hasta: '14:00' };
-        return { abierto: h.abierto, desde, hasta };
+      const horario = d.horario.map((h) => {
+        if (!h || typeof h.abierto !== 'boolean') return { abierto: false, rangos: [] };
+        // Migrar formato antiguo {abierto, desde, hasta} -> {abierto, rangos: [...]}
+        if (h.desde && h.hasta && !Array.isArray(h.rangos)) {
+          const desde = String(h.desde).slice(0, 5);
+          const hasta = String(h.hasta).slice(0, 5);
+          if (/^\d{2}:\d{2}$/.test(desde) && /^\d{2}:\d{2}$/.test(hasta)) {
+            return { abierto: h.abierto, rangos: [{ desde, hasta }] };
+          }
+          return { abierto: h.abierto, rangos: [] };
+        }
+        // Formato nuevo con rangos
+        if (Array.isArray(h.rangos)) {
+          const rangos = h.rangos.slice(0, 2).map((r) => {
+            if (!r || !r.desde || !r.hasta) return null;
+            const desde = String(r.desde).slice(0, 5);
+            const hasta = String(r.hasta).slice(0, 5);
+            if (/^\d{2}:\d{2}$/.test(desde) && /^\d{2}:\d{2}$/.test(hasta)) return { desde, hasta };
+            return null;
+          }).filter(Boolean);
+          return { abierto: h.abierto, rangos };
+        }
+        return { abierto: h.abierto, rangos: [] };
       });
       c.horario = horario;
       guardarClinicas();
