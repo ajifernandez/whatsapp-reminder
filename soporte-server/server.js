@@ -375,6 +375,21 @@ const horasMin = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `$
 // Mapeo de bucket a etiqueta legible y clase CSS
 const ETIQUETA_ESTADO = { ok: 'conectada', warning: 'con problemas', desconectado: 'desconectada', conectando: 'conectando', offline: 'sin señal', apagada: 'apagada' };
 
+// Recalcular los días acumulados desde cero usando c.cambios y el horario actual
+// Útil después de cambiar el horario de una clínica
+function recalcularDias(c, ahora) {
+  if (!c.cambios || c.cambios.length === 0) return;
+  c.dias = {};
+  // Procesar cada cambio de estado desde el primero
+  for (let i = 0; i < c.cambios.length; i++) {
+    const desde = c.cambios[i].t;
+    const hasta = (i + 1 < c.cambios.length) ? c.cambios[i + 1].t : ahora;
+    acumular(c.dias, c.cambios[i].estado, desde, hasta, c);
+  }
+  podarDias(c.dias);
+  guardarClinicas();
+}
+
 // Los ultimos 14 dias como casillas de color, cada una muestra el estado predominante
 function graficaDias(c, ahora) {
   const dias = JSON.parse(JSON.stringify(c.dias || {}));
@@ -592,6 +607,7 @@ function contenidoClinicas() {
 <td><b>${esc(c.alias || c.host || 'sin nombre')}</b>${c.alias ? `<br><small>${esc(c.host)}</small>` : ''}<br><small title="${esc(c.id)}">${esc(c.id.slice(0, 8))}</small>
 <a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}" style="color:var(--danger-text)">olvidar</a>
 <a href="#" class="accion" data-horario="${esc(c.id)}" data-horario-json="${esc(JSON.stringify(c.horario || null))}">🕐 Horario</a>
+<a href="#" class="accion" data-recalcular="${esc(c.id)}">🔄 Recalcular</a>
 ${diagnosticoHtml(c, v, ahora)}</td>
 <td>${esc(detalle(c, v, ahora))}${tecnicoHtml}</td>
 <td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
@@ -702,6 +718,7 @@ document.addEventListener('click', async (e) => {
   const d = e.target.dataset || {};
   if (d.historial) { e.preventDefault(); abrirHistorial(d.historial); return; }
   if (d.horario) { e.preventDefault(); abrirHorario(d.horario); return; }
+  if (d.recalcular) { e.preventDefault(); if (!confirm('¿Recalcular disponibilidad y riesgo con el horario actual?')) return; const r = await fetch('/clinicas/' + d.recalcular + '/recalcular', { method: 'POST' }); if (r.ok) refrescar(); else alert('No se pudo (' + r.status + ')'); return; }
   if (!d.renombrar && !d.olvidar && !d.pedir) return;
   e.preventDefault();
   let r;
@@ -883,9 +900,20 @@ http.createServer((req, res) => {
         return { abierto: h.abierto, rangos: [] };
       });
       c.horario = horario;
-      guardarClinicas();
+      // Recalcular los días acumulados con el nuevo horario
+      recalcularDias(c, Date.now());
       responder(res, 200, 'ok');
     });
+  }
+  // Recalcular días acumulados con el horario actual
+  const mr = req.method === 'POST' && url.pathname.match(/^\/clinicas\/([a-f0-9-]{16,40})\/recalcular$/);
+  if (mr) {
+    if (!origenPropio(req)) return responder(res, 403, 'origen no permitido');
+    if (!autorizar(req, res)) return;
+    const c = clinicas[mr[1]];
+    if (!c) return responder(res, 404, 'no');
+    recalcularDias(c, Date.now());
+    return responder(res, 200, 'recalculado');
   }
   const mc = (req.method === 'POST' || req.method === 'DELETE') && url.pathname.match(/^\/clinicas\/([a-f0-9-]{16,40})$/);
   if (mc) {
