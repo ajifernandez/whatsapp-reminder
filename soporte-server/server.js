@@ -14,6 +14,7 @@ const DATA_DIR = process.env.DATA_DIR || '/data';
 const NTFY_URL = process.env.NTFY_URL || ''; // opcional: https://ntfy.tudominio/tema
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASS || '';
+const SERVER_VERSION = process.env.SERVER_VERSION || '1.0.0';
 const ZONA = process.env.TZ || 'Europe/Madrid';
 const MAX_BYTES = 256 * 1024;
 const MAX_POR_HORA = 10; // por IP
@@ -77,96 +78,153 @@ function autorizar(req, res) {
   return false;
 }
 
-const ESTILO = `:root{--bg:#f8fafc;--surface:#fff;--border:#e2e8f0;--text:#0f172a;--text-secondary:#64748b;--primary:#2563eb;--primary-hover:#1d4ed8;--success:#16a34a;--success-bg:#dcfce7;--success-text:#166534;--warning:#d97706;--warning-bg:#fef3c7;--warning-text:#92400e;--danger:#dc2626;--danger-bg:#fee2e2;--danger-text:#991b1b;--info:#2563eb;--info-bg:#dbeafe;--info-text:#1e40af;--gray:#64748b;--gray-bg:#f1f5f9;--radius:8px;--shadow:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);--shadow-lg:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.06)}
+const ESTILO = `:root{--bg:#f4f7fb;--surface:#fff;--surface-muted:#f8fafc;--border:#e5eaf1;--text:#172033;--text-secondary:#667085;--primary:#3157c8;--primary-hover:#2546a8;--success:#16855b;--success-bg:#e8f6ef;--success-text:#126341;--warning:#a96808;--warning-bg:#fff4db;--warning-text:#865000;--danger:#c43d4b;--danger-bg:#fff0f0;--danger-text:#9f2633;--info:#3157c8;--info-bg:#edf2ff;--info-text:#2d4eb0;--gray:#64748b;--gray-bg:#eef2f6;--radius:12px;--shadow:0 1px 2px rgba(16,24,40,.04),0 4px 12px rgba(16,24,40,.04);--shadow-lg:0 16px 36px rgba(16,24,40,.16)}
 *{box-sizing:border-box}
-body{font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;background:var(--bg);color:var(--text)}
-.container{max-width:1200px;margin:0 auto;padding:20px}
-header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 20px;margin-bottom:24px;box-shadow:var(--shadow)}
-header h1{margin:0 0 4px;font-size:20px;font-weight:700;color:var(--text)}
-header p{margin:0;font-size:13px;color:var(--text-secondary)}
-nav{display:flex;gap:24px;margin-top:12px}
-nav a{color:var(--text-secondary);text-decoration:none;font-weight:500;padding:4px 0;border-bottom:2px solid transparent;transition:all .15s}
-nav a:hover{color:var(--primary)}
-nav a.activa{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
-h1{font-size:24px;font-weight:700;margin:0 0 16px;color:var(--text)}
-h2{font-size:18px;font-weight:600;margin:0 0 12px}
-.chip{display:inline-flex;align-items:center;padding:3px 10px;border-radius:9999px;font-weight:600;font-size:12px;line-height:1.4;white-space:nowrap}
+body{display:flex;flex-direction:column;min-height:100vh;font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+.container{max-width:1480px;margin:0 auto;padding:28px 32px}
+.site-header{background:var(--surface);border-bottom:1px solid var(--border)}
+.site-footer{margin-top:auto;background:var(--surface);border-top:1px solid var(--border)}
+.footer-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:16px;padding-bottom:16px;color:var(--text-secondary);font-size:11px}
+.header-inner{display:flex;align-items:center;justify-content:space-between;gap:32px;padding-top:18px;padding-bottom:18px}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
+.brand-mark{display:grid;place-items:center;width:42px;height:42px;flex:none;border-radius:13px;background:#edf2ff;color:var(--primary);font-size:20px}
+header h1{margin:0;font-size:17px;font-weight:700;letter-spacing:-.02em;color:var(--text)}
+header p{margin:2px 0 0;font-size:12px;color:var(--text-secondary)}
+nav{display:flex;align-items:center;gap:6px}
+nav a{color:var(--text-secondary);text-decoration:none;font-weight:600;padding:9px 14px;border-radius:8px;transition:all .15s}
+nav a:hover{color:var(--primary);background:var(--info-bg)}
+nav a.activa{color:var(--primary);background:var(--info-bg)}
+h1{font-size:26px;line-height:1.2;font-weight:700;letter-spacing:-.035em;margin:0;color:var(--text)}
+h2{font-size:15px;font-weight:650;margin:0;color:var(--text)}
+.page-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin:4px 0 24px}
+.eyebrow{margin:0 0 7px;color:var(--primary);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.page-description{margin:8px 0 0;color:var(--text-secondary);font-size:13px}
+.live-indicator{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;background:var(--success-bg);color:var(--success-text);border-radius:999px;font-size:12px;font-weight:650;white-space:nowrap}
+.live-indicator:before{content:'';width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px rgba(22,133,91,.12)}
+.chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-weight:650;font-size:11px;line-height:1.4;white-space:nowrap}
 .ok{background:var(--success-bg);color:var(--success-text)}.warning{background:var(--warning-bg);color:var(--warning-text)}.conectando{background:var(--info-bg);color:var(--info-text)}
-.desconectado{background:var(--danger-bg);color:var(--danger-text)}.offline{background:var(--gray);color:#fff}.apagada{background:var(--gray-bg);color:var(--gray)}
+.desconectado{background:var(--danger-bg);color:var(--danger-text)}.offline{background:#667085;color:#fff}.apagada{background:var(--gray-bg);color:var(--gray)}
 .riesgo-alto{background:var(--danger-bg);color:var(--danger-text)}.riesgo-medio{background:var(--warning-bg);color:var(--warning-text)}.riesgo-bajo{background:var(--success-bg);color:var(--success-text)}
-.resumen{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;padding:16px;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow)}
-.resumen .chip{font-size:13px;padding:4px 12px}
-.alerta{background:var(--danger-bg);border:1px solid #fecaca;border-radius:var(--radius);padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.6}
-.alerta strong{color:var(--danger-text)}
-.alerta small{color:var(--danger-text)}
-table{width:100%;border-collapse:collapse;background:var(--surface);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
-thead{background:#f8fafc}
-th{font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);padding:12px 14px;text-align:left;border-bottom:2px solid var(--border)}
-td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:top;font-size:13px}
-tr:last-child td{border-bottom:none}
-tr:hover td{background:#f8fafc}
-small{color:var(--text-secondary);font-size:12px}
-a.accion{color:var(--primary);text-decoration:none;font-size:12px;font-weight:500;margin-left:8px;transition:color .15s}
+.summary-card{margin-bottom:20px;padding:18px 20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.summary-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px}
+.summary-heading p{margin:0;color:var(--text-secondary);font-size:12px}
+.summary-groups{display:flex;flex-wrap:wrap;gap:22px}
+.summary-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.summary-label{color:var(--text-secondary);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.summary-pills{display:flex;flex-wrap:wrap;gap:7px}
+.summary-pills .chip{font-size:12px;padding:5px 11px}
+.summary-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;padding:14px 18px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.summary-metrics{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.summary-toolbar .chip{font-size:12px;padding:6px 11px}
+.toolbar-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.alerta{background:var(--danger-bg);border:1px solid #f5c5c8;border-left:4px solid var(--danger);border-radius:var(--radius);padding:14px 18px;margin:0 0 20px;font-size:13px;line-height:1.65;color:#702d35}
+.alerta strong{color:var(--danger-text)}.alerta small{color:var(--danger-text)}
+.table-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.table-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 20px;border-bottom:1px solid var(--border)}
+.table-toolbar p{margin:3px 0 0;color:var(--text-secondary);font-size:12px}
+.table-wrap{width:100%;overflow:auto}
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--surface)}
+.clinics-table{min-width:1240px}
+.diagnostics-table{min-width:900px}
+thead{background:var(--surface-muted)}
+th{position:sticky;top:0;z-index:1;background:var(--surface-muted);font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.075em;color:#667085;padding:12px 14px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:14px;border-bottom:1px solid #edf0f4;vertical-align:top;font-size:12px}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:#fafbfe}
+small{color:var(--text-secondary);font-size:11px}
+.clinic-identity{min-width:190px}
+.clinic-name{font-size:13px;font-weight:700;letter-spacing:-.01em}
+.clinic-meta{display:block;margin-top:2px;color:var(--text-secondary);font-size:11px}
+.clinic-id{display:block;margin-top:4px;color:#98a2b3;font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+.clinic-actions,.diagnostic-actions{display:flex;align-items:center;flex-wrap:wrap;gap:5px 11px;margin-top:9px}
+a.accion{display:inline-flex;align-items:center;color:var(--primary);text-decoration:none;font-size:11px;font-weight:600;margin:0;transition:color .15s}
 a.accion:hover{color:var(--primary-hover);text-decoration:underline}
-.dias{display:flex;gap:2px;margin-bottom:6px}
-.dia-celda{display:flex;flex-direction:column;align-items:center;gap:2px}
-.dia{display:inline-block;width:11px;height:22px;border-radius:3px;background:var(--gray-bg);transition:transform .1s}
-.dia:hover{transform:scaleY(1.2)}
+.clinic-actions a[data-olvidar],a.accion.danger-link{color:var(--danger-text)}
+.diagnostic-links{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.pending-note{color:var(--warning-text)}
+.detail-main{font-size:12px;line-height:1.5}
+.tech-details{display:block;margin-top:5px}
+.version-main{font-weight:650;white-space:nowrap}
+.version-meta{display:block;margin-top:3px}
+.time-value{white-space:nowrap;font-variant-numeric:tabular-nums}
+.clinic-contact{min-width:110px}
+.clinic-contact small{display:block;overflow-wrap:anywhere}
+.clinic-contact .accion{margin-top:6px}
+.dias{display:flex;gap:4px;margin-bottom:7px}
+.dia-celda{display:flex;flex-direction:column;align-items:center;gap:4px}
+.dia{display:inline-block;width:10px;height:22px;border-radius:4px;background:var(--gray-bg);transition:transform .1s}
+.dia:hover{transform:scaleY(1.12)}
 .dia-label{font-size:9px;color:var(--text-secondary);line-height:1}
-.d-ok{background:var(--success)}.d-aviso{background:var(--warning)}.d-mal{background:var(--danger)}.sd{background:var(--gray-bg)}
+.d-ok{background:var(--success)}.d-aviso{background:#e8a12c}.d-mal{background:var(--danger)}.sd{background:var(--gray-bg)}
 .historial{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--text-secondary)}
 .historial li{margin:3px 0}
-.card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:12px}
+.diag-origin{font-weight:700;font-size:12px}
+.diag-subline{display:block;margin-top:3px}
+.diag-state{display:inline-flex;max-width:260px;padding:4px 8px;border-radius:7px;background:var(--gray-bg);font-size:11px;font-weight:600;line-height:1.4}
+.diag-error{display:block;max-width:300px;margin-top:5px;color:var(--danger-text);line-height:1.45}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;border-radius:8px;font-family:inherit;font-size:12px;font-weight:600;line-height:1.2;text-decoration:none;transition:all .15s;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
+.btn-secondary{background:var(--surface);color:var(--text);border-color:var(--border)}.btn-secondary:hover{background:var(--surface-muted);border-color:#cdd5df}
+.btn-danger{background:var(--danger-bg);color:var(--danger-text);border-color:#f5c5c8}.btn-danger:hover{background:#ffe3e4}
+.btn-small{padding:6px 9px;font-size:11px}
+button:disabled{opacity:.55;cursor:not-allowed}
+input[type=checkbox]{width:15px;height:15px;accent-color:var(--primary);vertical-align:middle;cursor:pointer}
+.empty-state{padding:36px 20px;text-align:center;color:var(--text-secondary);font-size:13px}
+.table-note{margin:12px 2px 0;color:var(--text-secondary);font-size:11px}
+.refresh-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:16px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)}
+.refresh-bar small{font-size:11px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin-bottom:12px}
 .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .card-title{font-weight:600;font-size:15px}
 .card-body{font-size:13px;line-height:1.6}
 .card-footer{display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;transition:all .15s;border:none;cursor:pointer}
-.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
-.btn-secondary{background:var(--gray-bg);color:var(--text)}.btn-secondary:hover{background:var(--border)}
-.btn-danger{background:var(--danger-bg);color:var(--danger-text)}.btn-danger:hover{background:#fecaca}
-.grid{display:grid;gap:12px}
-.grid-2{grid-template-columns:repeat(2,1fr)}
-.grid-3{grid-template-columns:repeat(3,1fr)}
-.grid-4{grid-template-columns:repeat(4,1fr)}
-.stat{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;text-align:center}
-.stat-value{font-size:28px;font-weight:700;color:var(--text)}
-.stat-label{font-size:12px;color:var(--text-secondary);margin-top:4px}
+.grid{display:grid;gap:12px}.grid-2{grid-template-columns:repeat(2,1fr)}.grid-3{grid-template-columns:repeat(3,1fr)}.grid-4{grid-template-columns:repeat(4,1fr)}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;text-align:center}
+.stat-value{font-size:28px;font-weight:700;color:var(--text)}.stat-label{font-size:12px;color:var(--text-secondary);margin-top:4px}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600}
 .fade-in{animation:fadeIn .3s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.horario-dia-bloque{padding:8px;border-radius:6px;background:var(--gray-bg);margin-bottom:4px}
+.horario-dia-bloque{padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-muted);margin-bottom:5px}
 .horario-dia-cabecera{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.horario-dia-nombre{min-width:80px;font-weight:500;font-size:13px}
+.horario-dia-nombre{min-width:80px;font-weight:600;font-size:12px}
 .horario-check{width:18px;height:18px;cursor:pointer;accent-color:var(--primary)}
-.horario-rango-fila{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.horario-rango-fila{display:flex;align-items:center;gap:7px;margin-bottom:4px}
 .horario-rango-check{width:14px;height:14px;cursor:pointer;accent-color:var(--info)}
-.horario-desde,.horario-hasta{width:90px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:inherit}
+.horario-desde,.horario-hasta{width:90px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;background:var(--surface)}
 .horario-desde:disabled,.horario-hasta:disabled{opacity:.4;cursor:not-allowed}
 .horario-rango-label{font-size:11px;color:var(--text-secondary);min-width:20px}
-@media(max-width:768px){
-.container{padding:12px}
-header{padding:12px 16px}
-header h1{font-size:18px}
-nav{gap:16px}
-h1{font-size:20px}
-.resumen{padding:12px}
-table{display:block;overflow-x:auto}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid rgba(49,87,200,.25);outline-offset:2px}
+@media(max-width:1200px){.container{padding-left:20px;padding-right:20px}}
+@media(min-width:851px) and (max-width:1200px){.clinics-table{min-width:0;table-layout:fixed}.clinics-table th{white-space:normal;line-height:1.3}.clinics-table th,.clinics-table td{padding-left:6px;padding-right:6px;overflow-wrap:anywhere}.clinics-table .chip{padding:3px 5px;font-size:10px}.clinics-table th:nth-child(1),.clinics-table td:nth-child(1){width:9%}.clinics-table th:nth-child(2),.clinics-table td:nth-child(2){width:9%}.clinics-table th:nth-child(3),.clinics-table td:nth-child(3){width:19%}.clinics-table th:nth-child(4),.clinics-table td:nth-child(4){width:14%}.clinics-table th:nth-child(5),.clinics-table td:nth-child(5){width:9%}.clinics-table th:nth-child(6),.clinics-table td:nth-child(6){width:8%}.clinics-table th:nth-child(7),.clinics-table td:nth-child(7){width:8%}.clinics-table th:nth-child(8),.clinics-table td:nth-child(8){width:19%}.clinics-table th:nth-child(9),.clinics-table td:nth-child(9){width:5%}.clinic-identity,.clinic-contact{min-width:0}.clinic-actions{gap:5px}.dias{flex-wrap:wrap;gap:2px}.dia{width:7px;height:18px}.dia-label{font-size:8px}.version-main{white-space:normal;overflow-wrap:anywhere}}
+@media(max-width:850px){.container{padding:22px 20px}.summary-groups{gap:14px}}
+@media(max-width:640px){
+.container{padding:18px 14px}
+.header-inner{align-items:flex-start;flex-direction:column;gap:14px}
+nav{width:100%;gap:4px}
+nav a{flex:1;text-align:center;padding:8px 10px}
+h1{font-size:22px}
+.page-heading{align-items:flex-start;flex-direction:column;margin-bottom:18px}
+.summary-card{padding:15px}
+.summary-heading{align-items:flex-start;flex-direction:column;gap:4px}
+.summary-groups{flex-direction:column;gap:12px}
+.summary-group{align-items:flex-start;flex-direction:column;gap:6px}
+.summary-toolbar{align-items:flex-start;flex-direction:column;padding:14px}
+.toolbar-actions{justify-content:flex-start;width:100%}
+.table-toolbar{align-items:flex-start;padding:15px}
+.refresh-bar{align-items:flex-start;flex-direction:column}
 .grid-2,.grid-3,.grid-4{grid-template-columns:1fr}
-.stat{padding:12px}
-.stat-value{font-size:24px}
+.stat{padding:12px}.stat-value{font-size:24px}
 }`;
 
 function plantilla(titulo, activa, cuerpo, extra = '') {
   const favicon = '<link rel="icon" href="data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="28" font-size="28">📊</text></svg>') + '">';
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${favicon}<title>${esc(titulo)}</title><style>${ESTILO}</style>
-<header class="container">
-<h1>📊 Panel de Soporte</h1>
-<p>Monitor de clínicas · WhatsApp Reminder</p>
-<nav><a href="/clinicas"${activa === 'clinicas' ? ' class="activa"' : ''}>Clínicas</a><a href="/diagnosticos"${activa === 'diagnosticos' ? ' class="activa"' : ''}>Diagnósticos</a></nav>
-</header>
-<div class="container">${cuerpo}</div>${extra}`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+${favicon}<title>${esc(titulo)} · Soporte</title><style>${ESTILO}</style></head><body>
+<header class="site-header"><div class="container header-inner">
+<div class="brand"><div class="brand-mark" aria-hidden="true">◈</div><div><h1>Panel de Soporte</h1><p>Monitor de clínicas · WhatsApp Reminder</p></div></div>
+<nav aria-label="Navegación principal"><a href="/clinicas"${activa === 'clinicas' ? ' class="activa" aria-current="page"' : ''}>Clínicas</a><a href="/diagnosticos"${activa === 'diagnosticos' ? ' class="activa" aria-current="page"' : ''}>Diagnósticos</a></nav>
+</div></header>
+<main class="container">${cuerpo}</main>${extra}<footer class="site-footer"><div class="container footer-inner"><span>WhatsApp Reminder · Panel de soporte</span><span>Servidor v${esc(SERVER_VERSION)}</span></div></footer></body></html>`;
 }
 
 function paginaListado() {
@@ -178,23 +236,23 @@ function paginaListado() {
     const fecha = fs.statSync(path.join(DATA_DIR, n)).mtime.toLocaleString('es-ES', { timeZone: ZONA });
     const u = encodeURIComponent(n);
     return `<tr>
-      <td><input type="checkbox" class="diag-check" value="${esc(n)}"></td>
-      <td>${esc(d.host)}<br><small>${esc(d._ip)}</small></td>
-      <td>${esc(fecha)}</td>
-      <td>${esc(d.version)}</td>
-      <td>${esc(d.estado)}${d.ultimoError ? `<br><small>${esc(String(d.ultimoError).slice(0, 80))}</small>` : ''}</td>
-      <td><a href="/f/${u}" class="accion">ver</a> · <a href="/f/${u}?d=1" class="accion">descargar</a> · <a href="#" data-borrar="${esc(n)}" class="accion" style="color:var(--danger-text)">borrar</a></td>
+      <td><input type="checkbox" class="diag-check" value="${esc(n)}" aria-label="Seleccionar informe de ${esc(d.host || 'origen desconocido')}"></td>
+      <td><span class="diag-origin">${esc(d.host || 'Origen desconocido')}</span><small class="diag-subline">${esc(d._ip || 'IP no disponible')}</small></td>
+      <td><span class="time-value">${esc(fecha)}</span></td>
+      <td><span class="version-main">${esc(d.version || '—')}</span></td>
+      <td><span class="diag-state">${esc(d.estado || 'Sin estado')}</span>${d.ultimoError ? `<small class="diag-error">${esc(String(d.ultimoError).slice(0, 120))}</small>` : ''}</td>
+      <td><div class="diagnostic-actions"><a href="/f/${u}" class="btn btn-secondary btn-small">Ver informe</a><a href="/f/${u}?d=1" class="btn btn-secondary btn-small">Descargar</a><a href="#" data-borrar="${esc(n)}" class="accion danger-link">Borrar</a></div></td>
     </tr>`;
   });
-  return plantilla('Diagnósticos', 'diagnosticos', `<h1>📋 Diagnósticos recibidos</h1>
-<div class="resumen"><span class="chip" style="background:var(--info-bg);color:var(--info-text)">${todos.length} informes</span><span class="chip" style="background:var(--gray-bg);color:var(--gray)">${kb} KB</span>
-<button id="btnBorrarSel" class="btn btn-danger" style="margin-left:auto;display:none" disabled>🗑️ Borrar seleccionados (<span id="selCount">0</span>)</button>
-<button id="btnSelTodo" class="btn btn-secondary" style="margin-left:8px">Select All</button>
-<button id="btnDeselTodo" class="btn btn-secondary" style="margin-left:4px">Deselect All</button></div>
-<table><thead><tr>
-  <th><input type="checkbox" id="checkAllHeader" title="Seleccionar todo"></th>
-  <th>Origen</th><th>Fecha</th><th>Versión</th><th>Estado</th><th>Acciones</th>
-</tr></thead><tbody>${filas.join('') || '<tr><td colspan=6 style="text-align:center;padding:24px;color:var(--text-secondary)">Sin informes todavía</td></tr>'}</tbody></table>`, `
+  return plantilla('Diagnósticos', 'diagnosticos', `<section class="page-heading"><div><p class="eyebrow">Soporte técnico</p><h1>Diagnósticos recibidos</h1><p class="page-description">Consulta, descarga o elimina los informes enviados por las instalaciones.</p></div></section>
+<div class="summary-toolbar"><div class="summary-metrics"><span class="chip" style="background:var(--info-bg);color:var(--info-text)">${todos.length} informes</span><span class="chip" style="background:var(--gray-bg);color:var(--gray)">${kb} KB almacenados</span></div>
+<div class="toolbar-actions"><button id="btnBorrarSel" class="btn btn-danger" style="display:none" disabled>Borrar seleccionados (<span id="selCount">0</span>)</button>
+<button id="btnSelTodo" class="btn btn-secondary">Seleccionar visibles</button><button id="btnDeselTodo" class="btn btn-secondary">Quitar selección</button></div></div>
+<section class="table-card" aria-label="Listado de diagnósticos"><div class="table-toolbar"><div><h2>Historial de informes</h2><p>Se muestran los ${Math.min(todos.length, 200)} más recientes · máximo 200 por página</p></div></div>
+<div class="table-wrap"><table class="data-table diagnostics-table"><thead><tr>
+  <th><input type="checkbox" id="checkAllHeader" title="Seleccionar todos los informes visibles" aria-label="Seleccionar todos los informes visibles"></th>
+  <th>Equipo de origen</th><th>Fecha de recepción</th><th>Versión</th><th>Estado del informe</th><th>Acciones</th>
+</tr></thead><tbody>${filas.join('') || '<tr><td colspan="6"><div class="empty-state">Aún no se han recibido informes de diagnóstico.</div></td></tr>'}</tbody></table></div></section>`, `
 <script>
 const checks = () => document.querySelectorAll('.diag-check');
 const selCount = document.getElementById('selCount');
@@ -488,16 +546,16 @@ function diagnosticoHtml(c, v, ahora) {
   const pendiente = c.orden && ahora - c.orden.t < ORDEN_MAX_MS;
   const espera = ['offline', 'apagada'].includes(v) ? 'cuando la aplicación vuelva a dar señal' : 'en el próximo latido (como mucho 5 min)';
   const accion = pendiente
-    ? `<br><small>⏳ Diagnóstico pedido ${esc(hace(ahora - c.orden.t))}: llegará ${espera}</small>`
-    : `<br><a href="#" class="accion" style="margin-left:0" data-pedir="${esc(c.id)}">📋 Pedir diagnóstico</a>`;
-  const ultimo = c.ultimoDiag ? `<br><small>Último: <a href="/f/${encodeURIComponent(c.ultimoDiag.archivo)}" class="accion" style="margin-left:0">${esc(hace(ahora - c.ultimoDiag.t))}</a></small>` : '';
-  return accion + ultimo;
+    ? `<small class="pending-note">⏳ Diagnóstico pedido ${esc(hace(ahora - c.orden.t))} · llegará ${espera}</small>`
+    : `<a href="#" class="accion" data-pedir="${esc(c.id)}">Pedir diagnóstico</a>`;
+  const ultimo = c.ultimoDiag ? `<small>Último informe: <a href="/f/${encodeURIComponent(c.ultimoDiag.archivo)}" class="accion">${esc(hace(ahora - c.ultimoDiag.t))}</a></small>` : '';
+  return `<div class="diagnostic-links">${accion}${ultimo}</div>`;
 }
 
 // Historial de transiciones: enlace que abre un modal
 function historialHtml(c) {
   if (!c.cambios || !c.cambios.length) return '';
-  return `<a href="#" class="accion" data-historial="${esc(c.id)}" title="Ver historial de estados">📜 Historial (${c.cambios.length})</a>`;
+  return `<a href="#" class="accion" data-historial="${esc(c.id)}" title="Ver historial de estados">Ver historial (${c.cambios.length})</a>`;
 }
 
 // Modal de historial (se inyecta en el HTML)
@@ -600,32 +658,34 @@ function contenidoClinicas() {
     if (c.cpu != null) tecnico.push(`CPU ${c.cpu}%`);
     if (c.memMB != null) tecnico.push(`RAM ${c.memMB} MB`);
     if (c.citas != null) tecnico.push(`${c.citas} citas`);
-    const tecnicoHtml = tecnico.length ? `<br><small>${tecnico.join(' · ')}</small>` : '';
+    const tecnicoHtml = tecnico.length ? `<small class="tech-details">${tecnico.join(' · ')}</small>` : '';
     return `<tr>
 <td><span class="chip ${v}">${esc(ETIQUETA[v])}</span></td>
-<td><span class="chip riesgo-${riesgo}">riesgo ${esc(riesgo)}</span></td>
-<td><b>${esc(c.alias || c.host || 'sin nombre')}</b>${c.alias ? `<br><small>${esc(c.host)}</small>` : ''}<br><small title="${esc(c.id)}">${esc(c.id.slice(0, 8))}</small>
-<a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}" style="color:var(--danger-text)">olvidar</a>
-<a href="#" class="accion" data-horario="${esc(c.id)}" data-horario-json="${esc(JSON.stringify(c.horario || null))}">🕐 Horario</a>
-<a href="#" class="accion" data-recalcular="${esc(c.id)}">🔄 Recalcular</a>
-${diagnosticoHtml(c, v, ahora)}</td>
-<td>${esc(detalle(c, v, ahora))}${tecnicoHtml}</td>
-<td>${esc(c.version)}<br><small>${esc(c.motor)}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
-<td>${esc(hace(ahora - c.ultimo))}</td>
-<td>${esc(c.desdeEstado ? hace(ahora - c.desdeEstado) : '')}</td>
+<td><span class="chip riesgo-${riesgo}">Riesgo ${esc(riesgo)}</span></td>
+<td><div class="clinic-identity"><strong class="clinic-name">${esc(c.alias || c.host || 'Sin nombre')}</strong>${c.alias ? `<span class="clinic-meta">${esc(c.host)}</span>` : ''}<span class="clinic-id" title="${esc(c.id)}">ID ${esc(c.id.slice(0, 8))}</span>
+<div class="clinic-actions"><a href="#" class="accion" data-renombrar="${esc(c.id)}" data-alias="${esc(c.alias || '')}">Renombrar</a><a href="#" class="accion" data-olvidar="${esc(c.id)}">Olvidar</a>
+<a href="#" class="accion" data-horario="${esc(c.id)}" data-horario-json="${esc(JSON.stringify(c.horario || null))}">Horario</a>
+<a href="#" class="accion" data-recalcular="${esc(c.id)}">Recalcular</a></div>
+${diagnosticoHtml(c, v, ahora)}</div></td>
+<td><span class="detail-main">${esc(detalle(c, v, ahora) || 'Sin incidencias registradas')}</span>${tecnicoHtml}</td>
+<td><span class="version-main">${esc(c.version || '—')}</span><small class="version-meta">${esc(c.motor || 'Motor no indicado')}${c.canal && c.canal !== 'main' ? ' · canal ' + esc(c.canal) : ''}</small></td>
+<td><span class="time-value">${esc(hace(ahora - c.ultimo))}</span></td>
+<td><span class="time-value">${esc(c.desdeEstado ? hace(ahora - c.desdeEstado) : '—')}</span></td>
 <td>${graficaDias(c, ahora)}</td>
-<td><small>${esc(c.ip)}</small>${historialHtml(c)}</td></tr>`;
+<td class="clinic-contact"><small>${esc(c.ip || 'IP no disponible')}</small>${historialHtml(c)}</td></tr>`;
   });
   const alertas = alertasProactivas();
-  return `${alertas}<h1>🏥 Clínicas (${filas.length})</h1>
-<div class="resumen">${resumen} ${resumenRiesgo ? '<br>' + resumenRiesgo : ''}</div>
-<table><thead><tr><th>Estado</th><th>Riesgo</th><th>Clínica</th><th>Detalle</th><th>Versión</th><th>Último latido</th><th>En este estado</th><th>Últimos 14 días</th><th>IP</th></tr></thead><tbody>${html.join('') || '<tr><td colspan=9 style="text-align:center;padding:32px;color:var(--text-secondary)">Sin clínicas todavía: aparecen cuando una aplicación manda su primer latido.</td></tr>'}</tbody></table>
-<p style="margin-top:16px"><small>Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» = ${Math.round(OFFLINE_MS / 60000)} min sin latidos.</small></p>`;
+  return `${alertas}<section class="page-heading"><div><p class="eyebrow">Monitorización en directo</p><h1>Clínicas</h1><p class="page-description">Estado y actividad de las instalaciones conectadas al servicio.</p></div><span class="live-indicator">${filas.length} instalaciones</span></section>
+<section class="summary-card" aria-label="Resumen operativo"><div class="summary-heading"><h2>Panorama del servicio</h2><p>Estado actual de conectividad y riesgo</p></div>
+<div class="summary-groups"><div class="summary-group"><span class="summary-label">Conexión</span><div class="summary-pills">${resumen || '<span class="page-description">Aún no ha llegado ningún latido.</span>'}</div></div>${resumenRiesgo ? `<div class="summary-group"><span class="summary-label">Riesgo</span><div class="summary-pills">${resumenRiesgo}</div></div>` : ''}</div></section>
+<section class="table-card" aria-label="Estado de las clínicas"><div class="table-toolbar"><div><h2>Instalaciones</h2><p>Ordenadas por nivel de riesgo y gravedad del estado.</p></div></div>
+<div class="table-wrap"><table class="data-table clinics-table"><thead><tr><th>Estado</th><th>Riesgo</th><th>Clínica</th><th>Detalle operativo</th><th>Versión</th><th>Última señal</th><th>En este estado</th><th>Disponibilidad · Últimos 14 días</th><th>Red</th></tr></thead><tbody>${html.join('') || '<tr><td colspan="9"><div class="empty-state">Aún no ha llegado ningún latido. Las clínicas aparecerán aquí al iniciar la aplicación.</div></td></tr>'}</tbody></table></div></section>
+<p class="table-note">Cada aplicación avisa cada 5 minutos y al cambiar de estado. «Sin señal» significa ${Math.round(OFFLINE_MS / 60000)} min sin latidos.</p>`;
 }
 
 function paginaClinicas() {
   return plantilla('Clínicas', 'clinicas', `<div id="contenido">${contenidoClinicas()}</div>
-<div style="margin-top:16px;padding:12px 16px;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center">
+<div class="refresh-bar">
 <small id="actualizado">🔄 Se actualiza sola cada ${REFRESCO_S} s.</small>
 <small style="color:var(--text-secondary)">Última actualización: <span id="ultimaHora">—</span></small>
 </div>

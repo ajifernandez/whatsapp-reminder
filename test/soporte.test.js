@@ -34,7 +34,7 @@ const ok = (n) => console.log('OK  ' + n);
 const dirsTemporales = [];
 
 (async () => {
-  let r = await arrancar({ env: { OFFLINE_MIN: '0.03' } }); // 1,8 s hasta "sin señal"
+  let r = await arrancar({ env: { OFFLINE_MIN: '0.03', SERVER_VERSION: '1.2.3' } }); // 1,8 s hasta "sin señal"
   dirsTemporales.push(r.dir);
   try {
     // --- validación y límites
@@ -50,7 +50,13 @@ const dirsTemporales = [];
     assert.equal((await fetch(r.base + '/clinicas', { headers: { Authorization: 'Basic ' + Buffer.from('admin:mal').toString('base64') } })).status, 401);
     const raiz = await r.pedir('/');
     assert.equal(raiz.status, 302); assert.equal(raiz.headers.get('location'), '/clinicas');
-    assert.match(await r.html('/clinicas'), /Aún no ha llegado ningún latido/);
+    const paginaVacia = await r.html('/clinicas');
+    assert.match(paginaVacia, /Aún no ha llegado ningún latido/);
+    assert.match(paginaVacia, /class="site-header"/, 'cabecera estructurada del panel');
+    assert.match(paginaVacia, /class="site-footer"[\s\S]*Servidor v1\.2\.3/, 'el pie muestra la versión configurada del servidor');
+    assert.ok(paginaVacia.includes('@media(min-width:851px) and (max-width:1200px){.clinics-table{min-width:0;table-layout:fixed}'), 'la tabla de clínicas se adapta al ancho de pantallas de 1080 px');
+    assert.match(paginaVacia, /class="data-table clinics-table"/, 'tabla de clínicas con diseño adaptable');
+    assert.match(paginaVacia, /class="summary-card"/, 'resumen operativo separado de la tabla');
     ok('/clinicas requiere contraseña; / redirige a /clinicas; vacío al principio');
 
     // --- cada estado se ve como toca
@@ -111,12 +117,12 @@ const dirsTemporales = [];
     assert.equal((await fetch(r.base + '/clinicas/' + ID1, { method: 'POST', body: '{"alias":"x"}' })).status, 401);
     assert.equal((await cambiar('Clínica Centro', { Origin: r.base })).status, 200);
     pagina = await r.html('/clinicas');
-    assert.match(pagina, /<b>Clínica Centro<\/b>/);
+    assert.match(pagina, /<strong class="clinic-name">Clínica Centro<\/strong>/);
     assert.match(pagina, /CLINICA-OK/, 'el nombre del equipo sigue debajo');
     await r.latido(base(ID1, { host: 'CLINICA-OK' }));
-    assert.match(await r.html('/clinicas'), /<b>Clínica Centro<\/b>/, 'un latido nuevo no pisa el alias');
+    assert.match(await r.html('/clinicas'), /<strong class="clinic-name">Clínica Centro<\/strong>/, 'un latido nuevo no pisa el alias');
     assert.equal((await r.pedir('/clinicas/' + ID1, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: '   ' }) })).status, 200);
-    assert.match(await r.html('/clinicas'), /<b>CLINICA-OK<\/b>/, 'alias vacío = vuelve el nombre del equipo');
+    assert.match(await r.html('/clinicas'), /<strong class="clinic-name">CLINICA-OK<\/strong>/, 'alias vacío = vuelve el nombre del equipo');
     assert.equal((await r.pedir('/clinicas/a1b2c3d4-ffff-4000-8000-00000000ffff', { method: 'DELETE' })).status, 404);
     ok('alias: solo con contraseña y desde la propia página; sobrevive a nuevos latidos; vacío vuelve al nombre del equipo');
 
@@ -136,7 +142,10 @@ const dirsTemporales = [];
     assert.match(diagPag, /btnSelTodo/, 'botón select all');
     assert.match(diagPag, /btnDeselTodo/, 'botón deselect all');
     assert.match(diagPag, /checkAllHeader/, 'checkbox en el header');
-    assert.match(diagPag, /colspan=6/, '6 columnas con checkbox');
+    assert.match(diagPag, /class="data-table diagnostics-table"/, 'tabla de diagnósticos adaptable');
+    assert.match(diagPag, /Historial de informes/, 'sección de tabla diferenciada');
+    assert.match(diagPag, /Seleccionar visibles/, 'acciones de selección en español');
+    assert.match(diagPag, /colspan="6"/, '6 columnas con checkbox');
     ok('el estado de las clínicas no aparece en la lista de diagnósticos; UI de selección masiva presente');
 
     // --- pedir diagnóstico desde la web: la petición viaja en la respuesta del latido
@@ -162,7 +171,7 @@ const dirsTemporales = [];
     assert.equal((await fetch(r.base + '/diagnostico', { method: 'POST', body: JSON.stringify({ ...informe, host: 'CLINICA-OK' }) })).status, 200);
     assert.equal((await (await r.latido(base(ID1, { host: 'CLINICA-OK' }))).json()).diagnostico, null, 'cumplida: ya no se pide');
     fila = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-OK'));
-    const enlace = /Último: <a href="\/f\/([^"]+)"/.exec(fila);
+    const enlace = /Último informe: <a href="\/f\/([^"]+)"/.exec(fila);
     assert.ok(enlace, 'enlace al último diagnóstico'); assert.match(fila, /data-pedir/, 'vuelve el botón');
     assert.equal((await r.pedir('/f/' + enlace[1])).status, 200, 'el enlace abre el informe');
     // un informe de una instalación desconocida o sin id no rompe nada
@@ -177,7 +186,7 @@ const dirsTemporales = [];
     pagina = await r.html('/clinicas?parcial=1');
     const filaAviso = pagina.split('<tr>').find((f) => f.includes('CLINICA-AVISO'));
     assert.match(filaAviso, /data-historial/, 'hay enlace de historial');
-    assert.match(filaAviso, /Historial \(\d+\)/, 'muestra el conteo de transiciones');
+    assert.match(filaAviso, /Ver historial \(\d+\)/, 'muestra el conteo de transiciones');
     // verificar endpoint API de historial
     const respHistorial = await r.pedir('/api/historial/' + ID2);
     assert.equal(respHistorial.status, 200, 'endpoint historial devuelve 200');
@@ -191,7 +200,7 @@ const dirsTemporales = [];
     const idCerrada = 'a1b2c3d4-0000-4000-8000-00000000000b';
     await r.latido(base(idCerrada, { host: 'CLINICA-SIN-CAMBIOS', estado: 'conectado' }));
     const filaSinCambios = (await r.html('/clinicas?parcial=1')).split('<tr>').find((f) => f.includes('CLINICA-SIN-CAMBIOS'));
-    assert.ok(filaSinCambios.includes('Historial (1)'), 'el primer estado cuenta como una transición');
+    assert.ok(filaSinCambios.includes('Ver historial (1)'), 'el primer estado cuenta como una transición');
     assert.ok(filaOk && typeof filaOk === 'string', 'la fila OK existe');
     ok('historial: cada instalación muestra enlace al historial y el endpoint API devuelve los cambios en orden');
 
@@ -206,7 +215,7 @@ const dirsTemporales = [];
   r = await arrancar({ dir: dirsTemporales[0], env: { OFFLINE_MIN: '60' } });
   try {
     const pagina = await r.html('/clinicas');
-    assert.match(pagina, /<b>CLINICA-OK<\/b>/);
+    assert.match(pagina, /<strong class="clinic-name">CLINICA-OK<\/strong>/);
     assert.match(pagina, /CLINICA-CAIDA/);
     ok('el estado de las clínicas sobrevive a reiniciar el receptor');
   } finally { await r.parar(); }
